@@ -9,7 +9,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "P&L",
-  description: "A Multi-tenant Next.js Starter Template",
+  description: "",
 };
 
 export default function RootLayout({

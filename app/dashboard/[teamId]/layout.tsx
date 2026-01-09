@@ -18,12 +18,6 @@ import { useParams, useRouter } from "next/navigation";
 import { UpsertUserOnMount } from "./layout.client";
 
 const navigationItems: SidebarItem[] = [
-  {
-    name: "Overview",
-    href: "/",
-    icon: Globe,
-    type: "item",
-  },
   { type: "label", name: "Spending" },
   {
     name: "Expenses",
