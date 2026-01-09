@@ -8,7 +8,7 @@ import { Provider } from "./provider";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Stack Template",
+  title: "P&L",
   description: "A Multi-tenant Next.js Starter Template",
 };
 

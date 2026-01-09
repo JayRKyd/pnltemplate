@@ -6,7 +6,7 @@ import { LucideIcon, Menu } from "lucide-react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -125,12 +125,12 @@ function HeaderBreadcrumb(props: { items: SidebarItem[], baseBreadcrumb?: Header
     <Breadcrumb>
       <BreadcrumbList>
         {props.baseBreadcrumb?.map((item, index) => (
-          <>
-            <BreadcrumbItem key={index}>
+          <Fragment key={item.href ?? index}>
+            <BreadcrumbItem>
               <BreadcrumbLink href={item.href}>{item.title}</BreadcrumbLink>
             </BreadcrumbItem>
-            <BreadcrumbSeparator key={`separator-${index}`} />
-          </>
+            <BreadcrumbSeparator />
+          </Fragment>
         ))}
 
         <BreadcrumbItem>

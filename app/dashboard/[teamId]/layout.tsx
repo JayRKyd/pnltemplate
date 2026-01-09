@@ -2,8 +2,20 @@
 
 import SidebarLayout, { SidebarItem } from "@/components/sidebar-layout";
 import { SelectedTeamSwitcher, useUser } from "@stackframe/stack";
-import { BadgePercent, BarChart4, Columns3, Globe, Locate, Settings2, ShoppingBag, ShoppingCart, Users } from "lucide-react";
+import {
+  BarChart4,
+  FileBarChart,
+  FilePlus,
+  FolderTree,
+  Globe,
+  Layers,
+  LineChart,
+  Receipt,
+  Settings2,
+  UserSquare2,
+} from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
+import { UpsertUserOnMount } from "./layout.client";
 
 const navigationItems: SidebarItem[] = [
   {
@@ -12,54 +24,42 @@ const navigationItems: SidebarItem[] = [
     icon: Globe,
     type: "item",
   },
+  { type: "label", name: "Spending" },
   {
-    type: 'label',
-    name: 'Management',
-  },
-  {
-    name: "Products",
-    href: "/products",
-    icon: ShoppingBag,
+    name: "Expenses",
+    href: "/expenses",
+    icon: Receipt,
     type: "item",
   },
   {
-    name: "People",
-    href: "/people",
-    icon: Users,
+    name: "New Expense",
+    href: "/expenses/new",
+    icon: FilePlus,
+    type: "item",
+  },
+  { type: "label", name: "Financials" },
+  {
+    name: "Budget",
+    href: "/budget",
+    icon: Layers,
     type: "item",
   },
   {
-    name: "Segments",
-    href: "/segments",
-    icon: Columns3,
+    name: "P&L",
+    href: "/pnl",
+    icon: FileBarChart,
     type: "item",
   },
   {
-    name: "Regions",
-    href: "/regions",
-    icon: Locate,
+    name: "Delta",
+    href: "/delta",
+    icon: LineChart,
     type: "item",
   },
   {
-    type: 'label',
-    name: 'Monetization',
-  },
-  {
-    name: "Revenue",
-    href: "/revenue",
-    icon: BarChart4,
-    type: "item",
-  },
-  {
-    name: "Orders",
-    href: "/orders",
-    icon: ShoppingCart,
-    type: "item",
-  },
-  {
-    name: "Discounts",
-    href: "/discounts",
-    icon: BadgePercent,
+    name: "Categories",
+    href: "/categories/1.%20Echipa",
+    icon: FolderTree,
     type: "item",
   },
   {
@@ -70,6 +70,12 @@ const navigationItems: SidebarItem[] = [
     name: "Configuration",
     href: "/configuration",
     icon: Settings2,
+    type: "item",
+  },
+  {
+    name: "Profile",
+    href: "/profile",
+    icon: UserSquare2,
     type: "item",
   },
 ];
@@ -98,6 +104,7 @@ export default function Layout(props: { children: React.ReactNode }) {
         href: `/dashboard/${team.id}`,
       }]}
     >
+      <UpsertUserOnMount />
       {props.children}
     </SidebarLayout>
   );
