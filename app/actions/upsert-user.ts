@@ -12,7 +12,7 @@ export async function upsertCurrentUser() {
 
   const { error } = await supabase.from("users").upsert({
     id: user.id,
-    email: user.email,
+    email: user.emailAddress ?? null,
     name: user.displayName ?? null,
     avatar_url: user.imageUrl ?? null,
     team_id: null,
