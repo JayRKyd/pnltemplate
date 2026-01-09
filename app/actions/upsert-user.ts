@@ -11,12 +11,13 @@ export async function upsertCurrentUser() {
   }
 
   const email = (user as any).email ?? null;
+  const avatar = (user as any).imageUrl ?? null;
 
   const { error } = await supabase.from("users").upsert({
     id: user.id,
     email,
     name: user.displayName ?? null,
-    avatar_url: user.imageUrl ?? null,
+    avatar_url: avatar,
     team_id: null,
   });
 
