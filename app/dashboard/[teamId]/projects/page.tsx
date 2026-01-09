@@ -6,11 +6,12 @@ export const metadata: Metadata = {
   description: "Team-scoped Supabase data example.",
 };
 
-export default function ProjectsPage({
+export default async function ProjectsPage({
   params,
 }: {
-  params: { teamId: string };
+  params: Promise<{ teamId: string }>;
 }) {
+  const { teamId } = await params;
   return (
     <div className="p-8 space-y-4">
       <div className="space-y-1">
@@ -19,7 +20,7 @@ export default function ProjectsPage({
           Data fetched from Supabase filtered by the active team.
         </p>
       </div>
-      <TeamProjects teamId={params.teamId} />
+      <TeamProjects teamId={teamId} />
     </div>
   );
 }
