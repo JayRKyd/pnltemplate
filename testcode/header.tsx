@@ -65,7 +65,11 @@ export function Header({ onNewExpense, onListExpenses, onPL, onProfile, onSettin
               <CustomSelect
                 value={selectedCompany}
                 onChange={onCompanyChange}
-                options={['Bono', 'Graffiti PR', 'ROCA']}
+                options={[
+                  { value: "Bono", label: "Bono" },
+                  { value: "Graffiti PR", label: "Graffiti PR" },
+                  { value: "ROCA", label: "ROCA" },
+                ]}
                 className="w-full px-6 py-3 border border-gray-300/50 bg-white/70 backdrop-blur-xl rounded-full text-gray-900 focus:outline-none focus:border-gray-400 transition-all shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)]"
                 style={{ fontSize: '0.9375rem', fontWeight: 400 }}
               />
