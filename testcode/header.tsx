@@ -1,7 +1,7 @@
 import { Bell, Settings, User, Menu, Plus, X, Building2, Users, LogOut, Smartphone } from 'lucide-react';
 import bonoLogo from 'figma:asset/c84a88abdf237daf96f6c84ae7d712b5a36fd98e.png';
 import { useState, useEffect, useRef } from 'react';
-import { CustomSelect } from './CustomSelect';
+import { CustomSelect } from './customselect';
 import { Palette } from 'lucide-react';
 
 interface HeaderProps {
