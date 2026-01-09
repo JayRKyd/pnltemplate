@@ -1,6 +1,5 @@
 import { Bell, Settings, User, Menu, Plus, X, Building2, Users, LogOut, Smartphone } from 'lucide-react';
 import bonoLogo from 'figma:asset/c84a88abdf237daf96f6c84ae7d712b5a36fd98e.png';
-import { ImageWithFallback } from './figma/ImageWithFallback';
 import { useState, useEffect, useRef } from 'react';
 import { CustomSelect } from './CustomSelect';
 import { Palette } from 'lucide-react';
@@ -130,7 +129,7 @@ export function Header({ onNewExpense, onListExpenses, onPL, onProfile, onSettin
                   <span className="text-gray-900 max-w-0 overflow-hidden opacity-0 group-hover:max-w-xs group-hover:opacity-100 transition-all duration-300 ease-in-out whitespace-nowrap" style={{ fontSize: '0.9375rem', fontWeight: 400 }}>
                     Bogdan Georgescu
                   </span>
-                  <ImageWithFallback src="https://images.unsplash.com/photo-1672685667592-0392f458f46f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBtYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NjQ2NDkyMDd8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral" alt="Bogdan Georgescu" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                  <img src="https://images.unsplash.com/photo-1672685667592-0392f458f46f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBtYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NjQ2NDkyMDd8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral" alt="Bogdan Georgescu" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
                 </button>
               </div>
               
@@ -144,7 +143,7 @@ export function Header({ onNewExpense, onListExpenses, onPL, onProfile, onSettin
                   <line x1="4" y1="9" x2="14" y2="9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                   <line x1="6" y1="14" x2="12" y2="14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                 </svg>
-                <ImageWithFallback src="https://images.unsplash.com/photo-1672685667592-0392f458f46f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBtYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NjQ2NDkyMDd8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral" alt="Bogdan Georgescu" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+                <img src="https://images.unsplash.com/photo-1672685667592-0392f458f46f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBtYW4lMjBwb3J0cmFpdHxlbnwxfHx8fDE3NjQ2NDkyMDd8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral" alt="Bogdan Georgescu" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
               </button>
             </div>
           </div>
