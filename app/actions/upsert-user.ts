@@ -10,9 +10,11 @@ export async function upsertCurrentUser() {
     throw new Error("No user in session");
   }
 
+  const email = (user as any).email ?? null;
+
   const { error } = await supabase.from("users").upsert({
     id: user.id,
-    email: user.emailAddress ?? null,
+    email,
     name: user.displayName ?? null,
     avatar_url: user.imageUrl ?? null,
     team_id: null,
