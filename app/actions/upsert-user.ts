@@ -10,9 +10,8 @@ export async function upsertCurrentUser() {
     throw new Error("No user in session");
   }
 
-  // Get selected team if available
-  const teams = await user.getTeams();
-  const selectedTeam = teams[0] || null;
+  // Get selected team if available (Stack Server user has getTeam)
+  const selectedTeam = await user.getTeam();
 
   const { error } = await supabase.from("users").upsert({
     id: user.id,
