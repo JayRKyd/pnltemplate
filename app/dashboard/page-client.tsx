@@ -19,6 +19,12 @@ export function PageClient() {
     }
   }, [teams, user]);
 
+  React.useEffect(() => {
+    if (user.selectedTeam) {
+      router.push(`/dashboard/${user.selectedTeam.id}`);
+    }
+  }, [router, user.selectedTeam]);
+
   if (teams.length === 0) {
     return (
       <div className="flex items-center justify-center h-screen w-screen">
@@ -48,12 +54,6 @@ export function PageClient() {
       </div>
     );
   }
-
-  React.useEffect(() => {
-    if (user.selectedTeam) {
-      router.push(`/dashboard/${user.selectedTeam.id}`);
-    }
-  }, [router, user.selectedTeam]);
 
   return null;
 }
