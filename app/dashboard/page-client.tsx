@@ -47,9 +47,13 @@ export function PageClient() {
         </div>
       </div>
     );
-  } else if (user.selectedTeam) {
-    router.push(`/dashboard/${user.selectedTeam.id}`);
   }
+
+  React.useEffect(() => {
+    if (user.selectedTeam) {
+      router.push(`/dashboard/${user.selectedTeam.id}`);
+    }
+  }, [router, user.selectedTeam]);
 
   return null;
 }
