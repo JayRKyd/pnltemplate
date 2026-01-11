@@ -21,7 +21,7 @@ export function PageClient() {
 
   React.useEffect(() => {
     if (user.selectedTeam) {
-      router.push(`/dashboard/${user.selectedTeam.id}`);
+      router.push(`/dashboard/${user.selectedTeam.id}/expenses`);
     }
   }, [router, user.selectedTeam]);
 
