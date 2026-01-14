@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { FormattedInput } from "./formatted-input";
@@ -83,19 +83,21 @@ export function ExpenseForm({ teamId, onBack }: Props) {
     }
   };
 
-  const updateLine = (index: number, field: keyof TransactionLine, value: any) => {
-    const newLines = [...lines];
-    newLines[index] = { ...newLines[index], [field]: value };
+  const updateLine = useCallback((index: number, field: keyof TransactionLine, value: any) => {
+    setLines(prevLines => {
+      const newLines = [...prevLines];
+      newLines[index] = { ...newLines[index], [field]: value };
 
-    // Auto-calculate amount without VAT (19% VAT rate)
-    if (field === "amount" && value) {
-      const amount = parseFloat(value) || 0;
-      const withoutVat = Math.round((amount / 1.19) * 100) / 100;
-      newLines[index].amountWithoutVat = withoutVat.toString();
-    }
+      // Auto-calculate amount without VAT (19% VAT rate)
+      if (field === "amount" && value) {
+        const amount = parseFloat(value) || 0;
+        const withoutVat = Math.round((amount / 1.19) * 100) / 100;
+        newLines[index].amountWithoutVat = withoutVat.toString();
+      }
 
-    setLines(newLines);
-  };
+      return newLines;
+    });
+  }, []);
 
   const addLine = () => {
     setLines([

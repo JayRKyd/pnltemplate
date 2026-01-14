@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { getTeamCategories, getSubcategories, ExpenseCategory } from "@/app/actions/categories";
 
 type Props = {
@@ -25,35 +25,63 @@ export function CategorySelect({
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [subcategories, setSubcategories] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingSubcategories, setLoadingSubcategories] = useState(false);
 
   // Load parent categories
   useEffect(() => {
+    let isMounted = true;
     if (teamId) {
       setLoading(true);
       getTeamCategories(teamId)
         .then((cats) => {
-          // Filter to only parent categories (no parent_id)
-          const parents = cats.filter((c) => !c.parent_id);
-          setCategories(parents);
+          if (isMounted) {
+            // Filter to only parent categories (no parent_id)
+            const parents = cats.filter((c) => !c.parent_id);
+            setCategories(parents);
+          }
         })
-        .finally(() => setLoading(false));
+        .catch((err) => {
+          console.error("Failed to load categories:", err);
+        })
+        .finally(() => {
+          if (isMounted) setLoading(false);
+        });
     }
+    return () => { isMounted = false; };
   }, [teamId]);
 
   // Load subcategories when category changes
   useEffect(() => {
+    let isMounted = true;
     if (categoryId && teamId) {
-      getSubcategories(teamId, categoryId).then(setSubcategories);
+      setLoadingSubcategories(true);
+      getSubcategories(teamId, categoryId)
+        .then((subs) => {
+          if (isMounted) {
+            setSubcategories(subs);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to load subcategories:", err);
+        })
+        .finally(() => {
+          if (isMounted) setLoadingSubcategories(false);
+        });
     } else {
       setSubcategories([]);
     }
+    return () => { isMounted = false; };
   }, [categoryId, teamId]);
 
-  const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleCategoryChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const newCategoryId = e.target.value;
     onCategoryChange(newCategoryId);
     onSubcategoryChange(""); // Reset subcategory when category changes
-  };
+  }, [onCategoryChange, onSubcategoryChange]);
+
+  const handleSubcategoryChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    onSubcategoryChange(e.target.value);
+  }, [onSubcategoryChange]);
 
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -84,8 +112,8 @@ export function CategorySelect({
         </label>
         <select
           value={subcategoryId}
-          onChange={(e) => onSubcategoryChange(e.target.value)}
-          disabled={disabled || !categoryId || subcategories.length === 0}
+          onChange={handleSubcategoryChange}
+          disabled={disabled || !categoryId || loadingSubcategories}
           className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50 ${
             hasError && !subcategoryId ? "border-red-500" : "border-gray-300"
           }`}
