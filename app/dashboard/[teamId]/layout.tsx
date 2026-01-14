@@ -13,6 +13,7 @@ import {
   Receipt,
   Settings2,
   UserSquare2,
+  Users,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { UpsertUserOnMount } from "./layout.client";
@@ -70,6 +71,12 @@ const navigationItems: SidebarItem[] = [
     name: "Profile",
     href: "/profile",
     icon: UserSquare2,
+    type: "item",
+  },
+  {
+    name: "Team Members",
+    href: "/team",
+    icon: Users,
     type: "item",
   },
 ];

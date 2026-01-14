@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 
-export default function DashboardIndex({
+export default async function DashboardIndex({
   params,
 }: {
-  params: { teamId: string };
+  params: Promise<{ teamId: string }>;
 }) {
-  redirect(`/dashboard/${params.teamId}/expenses`);
+  const { teamId } = await params;
+  redirect(`/dashboard/${teamId}/expenses`);
 }

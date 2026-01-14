@@ -1,0 +1,463 @@
+"use server";
+
+import { supabase } from "@/lib/supabase";
+import { stackServerApp } from "@/stack";
+
+// Enhanced expense interface matching new schema
+export interface TeamExpense {
+  id: string;
+  expense_uid: string | null;
+  parent_expense_id: string | null;
+  team_id: string;
+  user_id: string;
+  amount: number;
+  amount_without_vat: number | null;
+  vat_deductible: boolean;
+  status: string;
+  payment_status: string;
+  supplier: string | null;
+  description: string | null;
+  category: string | null;
+  category_id: string | null;
+  subcategory_id: string | null;
+  doc_number: string | null;
+  doc_type: string | null;
+  accounting_period: string | null;
+  expense_date: string;
+  rejection_reason: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  paid_at: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExpenseInput {
+  teamId: string;
+  amount: number;
+  amountWithoutVat?: number;
+  vatDeductible?: boolean;
+  supplier?: string;
+  description?: string;
+  categoryId?: string;
+  subcategoryId?: string;
+  docNumber?: string;
+  docType?: string;
+  paymentStatus?: string;
+  accountingPeriod?: string;
+  status?: string;
+  expenseDate?: string;
+}
+
+export interface ExpenseLineInput {
+  amount: number;
+  amountWithoutVat?: number;
+  vatDeductible?: boolean;
+  categoryId?: string;
+  subcategoryId?: string;
+  description?: string;
+  accountingPeriod?: string;
+}
+
+export interface ExpenseFilters {
+  status?: string;
+  categoryId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  supplier?: string;
+  search?: string;
+}
+
+// Get expenses with optional filters
+export async function getTeamExpenses(
+  teamId: string,
+  filters?: ExpenseFilters
+): Promise<TeamExpense[]> {
+  let query = supabase
+    .from("team_expenses")
+    .select("*")
+    .eq("team_id", teamId)
+    .is("deleted_at", null);
+
+  // Apply filters
+  if (filters?.status) {
+    query = query.eq("status", filters.status);
+  }
+  if (filters?.categoryId) {
+    query = query.eq("category_id", filters.categoryId);
+  }
+  if (filters?.dateFrom) {
+    query = query.gte("expense_date", filters.dateFrom);
+  }
+  if (filters?.dateTo) {
+    query = query.lte("expense_date", filters.dateTo);
+  }
+  if (filters?.supplier) {
+    query = query.ilike("supplier", `%${filters.supplier}%`);
+  }
+  if (filters?.search) {
+    query = query.or(
+      `supplier.ilike.%${filters.search}%,description.ilike.%${filters.search}%,expense_uid.ilike.%${filters.search}%`
+    );
+  }
+
+  const { data, error } = await query.order("expense_date", { ascending: false });
+
+  if (error) {
+    console.error("Failed to fetch team expenses", error);
+    throw new Error(error.message);
+  }
+
+  return data || [];
+}
+
+// Get single expense by ID
+export async function getExpense(expenseId: string): Promise<TeamExpense | null> {
+  const { data, error } = await supabase
+    .from("team_expenses")
+    .select("*")
+    .eq("id", expenseId)
+    .is("deleted_at", null)
+    .single();
+
+  if (error) {
+    console.error("Failed to fetch expense", error);
+    return null;
+  }
+
+  return data;
+}
+
+// Generate next expense UID using database function
+async function getNextExpenseUid(teamId: string): Promise<string> {
+  const { data, error } = await supabase.rpc("get_next_expense_id", {
+    p_team_id: teamId,
+  });
+
+  if (error) {
+    console.error("Failed to get next expense ID", error);
+    // Fallback to timestamp-based ID
+    return `EXP-${Date.now().toString(36).toUpperCase()}`;
+  }
+
+  return data;
+}
+
+// Create expense with all new fields
+export async function createExpense(input: ExpenseInput): Promise<TeamExpense> {
+  const user = await stackServerApp.getUser();
+  if (!user) {
+    throw new Error("No user in session");
+  }
+
+  // Get next expense UID
+  const expenseUid = await getNextExpenseUid(input.teamId);
+
+  const { data, error } = await supabase
+    .from("team_expenses")
+    .insert({
+      expense_uid: expenseUid,
+      team_id: input.teamId,
+      user_id: user.id,
+      amount: input.amount,
+      amount_without_vat: input.amountWithoutVat ?? null,
+      vat_deductible: input.vatDeductible ?? false,
+      supplier: input.supplier ?? null,
+      description: input.description ?? null,
+      category_id: input.categoryId ?? null,
+      subcategory_id: input.subcategoryId ?? null,
+      doc_number: input.docNumber ?? null,
+      doc_type: input.docType ?? null,
+      payment_status: input.paymentStatus ?? "unpaid",
+      accounting_period: input.accountingPeriod ?? null,
+      status: input.status ?? "draft",
+      expense_date: input.expenseDate ?? new Date().toISOString().split("T")[0],
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Failed to create expense", error);
+    throw new Error(error.message);
+  }
+
+  // Log audit entry
+  await logExpenseAudit(data.id, input.teamId, user.id, "created", null, data);
+
+  return data;
+}
+
+// Create multi-line expense (parent + lines)
+export async function createMultiLineExpense(
+  input: ExpenseInput,
+  lines: ExpenseLineInput[]
+): Promise<TeamExpense[]> {
+  const user = await stackServerApp.getUser();
+  if (!user) {
+    throw new Error("No user in session");
+  }
+
+  const baseUid = await getNextExpenseUid(input.teamId);
+  const results: TeamExpense[] = [];
+
+  // Create each line with derived UID
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineUid = lines.length > 1 ? `${baseUid}-${String.fromCharCode(97 + i)}` : baseUid;
+
+    const { data, error } = await supabase
+      .from("team_expenses")
+      .insert({
+        expense_uid: lineUid,
+        parent_expense_id: i > 0 ? results[0]?.id : null,
+        team_id: input.teamId,
+        user_id: user.id,
+        amount: line.amount,
+        amount_without_vat: line.amountWithoutVat ?? null,
+        vat_deductible: line.vatDeductible ?? false,
+        supplier: input.supplier ?? null,
+        description: line.description ?? null,
+        category_id: line.categoryId ?? null,
+        subcategory_id: line.subcategoryId ?? null,
+        doc_number: input.docNumber ?? null,
+        doc_type: input.docType ?? null,
+        payment_status: input.paymentStatus ?? "unpaid",
+        accounting_period: line.accountingPeriod ?? null,
+        status: input.status ?? "draft",
+        expense_date: input.expenseDate ?? new Date().toISOString().split("T")[0],
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Failed to create expense line", error);
+      throw new Error(error.message);
+    }
+
+    results.push(data);
+    await logExpenseAudit(data.id, input.teamId, user.id, "created", null, data);
+  }
+
+  return results;
+}
+
+// Update expense
+export async function updateExpense(
+  expenseId: string,
+  teamId: string,
+  updates: Partial<ExpenseInput>
+): Promise<TeamExpense> {
+  const user = await stackServerApp.getUser();
+  if (!user) {
+    throw new Error("No user in session");
+  }
+
+  // Get current state for audit
+  const current = await getExpense(expenseId);
+
+  const updateData: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (updates.amount !== undefined) updateData.amount = updates.amount;
+  if (updates.amountWithoutVat !== undefined) updateData.amount_without_vat = updates.amountWithoutVat;
+  if (updates.vatDeductible !== undefined) updateData.vat_deductible = updates.vatDeductible;
+  if (updates.supplier !== undefined) updateData.supplier = updates.supplier;
+  if (updates.description !== undefined) updateData.description = updates.description;
+  if (updates.categoryId !== undefined) updateData.category_id = updates.categoryId;
+  if (updates.subcategoryId !== undefined) updateData.subcategory_id = updates.subcategoryId;
+  if (updates.docNumber !== undefined) updateData.doc_number = updates.docNumber;
+  if (updates.docType !== undefined) updateData.doc_type = updates.docType;
+  if (updates.paymentStatus !== undefined) updateData.payment_status = updates.paymentStatus;
+  if (updates.accountingPeriod !== undefined) updateData.accounting_period = updates.accountingPeriod;
+  if (updates.expenseDate !== undefined) updateData.expense_date = updates.expenseDate;
+
+  const { data, error } = await supabase
+    .from("team_expenses")
+    .update(updateData)
+    .eq("id", expenseId)
+    .eq("team_id", teamId)
+    .is("deleted_at", null)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Failed to update expense", error);
+    throw new Error(error.message);
+  }
+
+  // Log audit entry
+  await logExpenseAudit(expenseId, teamId, user.id, "updated", current, data);
+
+  return data;
+}
+
+// Soft delete expense
+export async function deleteExpense(expenseId: string, teamId: string): Promise<void> {
+  const user = await stackServerApp.getUser();
+  if (!user) {
+    throw new Error("No user in session");
+  }
+
+  const current = await getExpense(expenseId);
+
+  const { error } = await supabase
+    .from("team_expenses")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", expenseId)
+    .eq("team_id", teamId);
+
+  if (error) {
+    console.error("Failed to delete expense", error);
+    throw new Error(error.message);
+  }
+
+  await logExpenseAudit(expenseId, teamId, user.id, "deleted", current, null);
+}
+
+// === WORKFLOW ACTIONS ===
+
+// Submit expense for approval
+export async function submitForApproval(expenseId: string, teamId: string): Promise<TeamExpense> {
+  return updateExpenseStatus(expenseId, teamId, "pending");
+}
+
+// Approve expense
+export async function approveExpense(expenseId: string, teamId: string): Promise<TeamExpense> {
+  const user = await stackServerApp.getUser();
+  if (!user) throw new Error("No user in session");
+
+  const { data, error } = await supabase
+    .from("team_expenses")
+    .update({
+      status: "approved",
+      approved_by: user.id,
+      approved_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", expenseId)
+    .eq("team_id", teamId)
+    .eq("status", "pending")
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  await logExpenseAudit(expenseId, teamId, user.id, "approved", null, data);
+  return data;
+}
+
+// Reject expense
+export async function rejectExpense(
+  expenseId: string,
+  teamId: string,
+  reason: string
+): Promise<TeamExpense> {
+  const user = await stackServerApp.getUser();
+  if (!user) throw new Error("No user in session");
+
+  const { data, error } = await supabase
+    .from("team_expenses")
+    .update({
+      status: "rejected",
+      rejection_reason: reason,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", expenseId)
+    .eq("team_id", teamId)
+    .eq("status", "pending")
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  await logExpenseAudit(expenseId, teamId, user.id, "rejected", null, data);
+  return data;
+}
+
+// Mark expense as paid
+export async function markAsPaid(expenseId: string, teamId: string): Promise<TeamExpense> {
+  const user = await stackServerApp.getUser();
+  if (!user) throw new Error("No user in session");
+
+  const { data, error } = await supabase
+    .from("team_expenses")
+    .update({
+      status: "paid",
+      payment_status: "paid",
+      paid_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", expenseId)
+    .eq("team_id", teamId)
+    .eq("status", "approved")
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  await logExpenseAudit(expenseId, teamId, user.id, "paid", null, data);
+  return data;
+}
+
+// Helper: Update status
+async function updateExpenseStatus(
+  expenseId: string,
+  teamId: string,
+  newStatus: string
+): Promise<TeamExpense> {
+  const user = await stackServerApp.getUser();
+  if (!user) throw new Error("No user in session");
+
+  const { data, error } = await supabase
+    .from("team_expenses")
+    .update({
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", expenseId)
+    .eq("team_id", teamId)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  await logExpenseAudit(expenseId, teamId, user.id, `status_${newStatus}`, null, data);
+  return data;
+}
+
+// === AUDIT LOGGING ===
+
+async function logExpenseAudit(
+  expenseId: string,
+  teamId: string,
+  userId: string,
+  action: string,
+  oldValue: unknown,
+  newValue: unknown
+): Promise<void> {
+  try {
+    await supabase.from("expense_audit_log").insert({
+      expense_id: expenseId,
+      team_id: teamId,
+      user_id: userId,
+      action,
+      changes: { old: oldValue, new: newValue },
+    });
+  } catch (err) {
+    console.error("Failed to log audit entry", err);
+  }
+}
+
+// Get audit log for expense
+export async function getExpenseAuditLog(expenseId: string) {
+  const { data, error } = await supabase
+    .from("expense_audit_log")
+    .select("*")
+    .eq("expense_id", expenseId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Failed to fetch audit log", error);
+    return [];
+  }
+
+  return data || [];
+}

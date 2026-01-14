@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@radix-ui/react-label";
 import { useUser } from "@stackframe/stack";
 import { useRouter } from "next/navigation";
+import { PendingInvitesBanner } from "@/components/pending-invites-banner";
 
 export function PageClient() {
   const router = useRouter();
@@ -28,28 +29,33 @@ export function PageClient() {
   if (teams.length === 0) {
     return (
       <div className="flex items-center justify-center h-screen w-screen">
-        <div className="max-w-xs w-full">
-          <h1 className="text-center text-2xl font-semibold">Welcome!</h1>
-          <p className="text-center text-gray-500">
-            Create a team to get started
-          </p>
-          <form
-            className="mt-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              user.createTeam({ displayName: teamDisplayName });
-            }}
-          >
-            <div>
-              <Label className="text-sm">Team name</Label>
-              <Input
-                placeholder="Team name"
-                value={teamDisplayName}
-                onChange={(e) => setTeamDisplayName(e.target.value)}
-              />
-            </div>
-            <Button className="mt-4 w-full">Create team</Button>
-          </form>
+        <div className="max-w-md w-full px-4">
+          {/* Show pending invites banner */}
+          <PendingInvitesBanner />
+          
+          <div className="bg-white dark:bg-gray-900 rounded-lg p-6 shadow-sm border">
+            <h1 className="text-center text-2xl font-semibold">Welcome!</h1>
+            <p className="text-center text-gray-500 mt-1">
+              Create a team to get started
+            </p>
+            <form
+              className="mt-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                user.createTeam({ displayName: teamDisplayName });
+              }}
+            >
+              <div>
+                <Label className="text-sm">Team name</Label>
+                <Input
+                  placeholder="Team name"
+                  value={teamDisplayName}
+                  onChange={(e) => setTeamDisplayName(e.target.value)}
+                />
+              </div>
+              <Button className="mt-4 w-full">Create team</Button>
+            </form>
+          </div>
         </div>
       </div>
     );
