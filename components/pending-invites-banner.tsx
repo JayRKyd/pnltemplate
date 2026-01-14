@@ -65,7 +65,7 @@ export function PendingInvitesBanner() {
             <Mail className="text-blue-600" size={20} />
             <div>
               <p className="font-medium text-blue-900 dark:text-blue-100">
-                You've been invited to join a team
+                You have been invited to join a team
               </p>
               <p className="text-sm text-blue-700 dark:text-blue-300">
                 Role: {invite.role} • Invited{" "}
