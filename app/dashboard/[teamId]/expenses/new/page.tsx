@@ -1,14 +1,10 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { ExpenseForm } from "@/components/expenses/expense-form";
+import { NewExpenseForm } from "@/components/expenses/new-expense-form";
 
 export default function NewExpensePage() {
   const params = useParams<{ teamId: string }>();
 
-  return (
-    <div className="p-6 md:p-8">
-      <ExpenseForm teamId={params.teamId} />
-    </div>
-  );
+  return <NewExpenseForm teamId={params.teamId} />;
 }

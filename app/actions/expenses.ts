@@ -12,7 +12,15 @@ export interface TeamExpense {
   user_id: string;
   amount: number;
   amount_without_vat: number | null;
+  amount_with_vat: number | null;
+  vat_rate: number | null;
   vat_deductible: boolean;
+  currency: string;
+  eur_amount: number | null;
+  usd_amount: number | null;
+  exchange_rate: number | null;
+  responsible_id: string | null;
+  tags: string[] | null;
   status: string;
   payment_status: string;
   supplier: string | null;
@@ -37,7 +45,15 @@ export interface ExpenseInput {
   teamId: string;
   amount: number;
   amountWithoutVat?: number;
+  amountWithVat?: number;
+  vatRate?: number;
   vatDeductible?: boolean;
+  currency?: string;
+  eurAmount?: number;
+  usdAmount?: number;
+  exchangeRate?: number;
+  responsibleId?: string;
+  tags?: string[];
   supplier?: string;
   description?: string;
   categoryId?: string;
@@ -53,6 +69,8 @@ export interface ExpenseInput {
 export interface ExpenseLineInput {
   amount: number;
   amountWithoutVat?: number;
+  amountWithVat?: number;
+  vatRate?: number;
   vatDeductible?: boolean;
   categoryId?: string;
   subcategoryId?: string;
@@ -66,6 +84,8 @@ export interface ExpenseFilters {
   dateFrom?: string;
   dateTo?: string;
   supplier?: string;
+  responsibleId?: string;
+  tags?: string[];
   search?: string;
 }
 
@@ -95,6 +115,12 @@ export async function getTeamExpenses(
   }
   if (filters?.supplier) {
     query = query.ilike("supplier", `%${filters.supplier}%`);
+  }
+  if (filters?.responsibleId) {
+    query = query.eq("responsible_id", filters.responsibleId);
+  }
+  if (filters?.tags && filters.tags.length > 0) {
+    query = query.overlaps("tags", filters.tags);
   }
   if (filters?.search) {
     query = query.or(
@@ -162,7 +188,15 @@ export async function createExpense(input: ExpenseInput): Promise<TeamExpense> {
       user_id: user.id,
       amount: input.amount,
       amount_without_vat: input.amountWithoutVat ?? null,
+      amount_with_vat: input.amountWithVat ?? null,
+      vat_rate: input.vatRate ?? null,
       vat_deductible: input.vatDeductible ?? false,
+      currency: input.currency ?? "RON",
+      eur_amount: input.eurAmount ?? null,
+      usd_amount: input.usdAmount ?? null,
+      exchange_rate: input.exchangeRate ?? null,
+      responsible_id: input.responsibleId ?? null,
+      tags: input.tags ?? null,
       supplier: input.supplier ?? null,
       description: input.description ?? null,
       category_id: input.categoryId ?? null,
@@ -215,7 +249,15 @@ export async function createMultiLineExpense(
         user_id: user.id,
         amount: line.amount,
         amount_without_vat: line.amountWithoutVat ?? null,
+        amount_with_vat: line.amountWithVat ?? null,
+        vat_rate: line.vatRate ?? null,
         vat_deductible: line.vatDeductible ?? false,
+        currency: input.currency ?? "RON",
+        eur_amount: input.eurAmount ?? null,
+        usd_amount: input.usdAmount ?? null,
+        exchange_rate: input.exchangeRate ?? null,
+        responsible_id: input.responsibleId ?? null,
+        tags: input.tags ?? null,
         supplier: input.supplier ?? null,
         description: line.description ?? null,
         category_id: line.categoryId ?? null,
@@ -262,7 +304,15 @@ export async function updateExpense(
 
   if (updates.amount !== undefined) updateData.amount = updates.amount;
   if (updates.amountWithoutVat !== undefined) updateData.amount_without_vat = updates.amountWithoutVat;
+  if (updates.amountWithVat !== undefined) updateData.amount_with_vat = updates.amountWithVat;
+  if (updates.vatRate !== undefined) updateData.vat_rate = updates.vatRate;
   if (updates.vatDeductible !== undefined) updateData.vat_deductible = updates.vatDeductible;
+  if (updates.currency !== undefined) updateData.currency = updates.currency;
+  if (updates.eurAmount !== undefined) updateData.eur_amount = updates.eurAmount;
+  if (updates.usdAmount !== undefined) updateData.usd_amount = updates.usdAmount;
+  if (updates.exchangeRate !== undefined) updateData.exchange_rate = updates.exchangeRate;
+  if (updates.responsibleId !== undefined) updateData.responsible_id = updates.responsibleId;
+  if (updates.tags !== undefined) updateData.tags = updates.tags;
   if (updates.supplier !== undefined) updateData.supplier = updates.supplier;
   if (updates.description !== undefined) updateData.description = updates.description;
   if (updates.categoryId !== undefined) updateData.category_id = updates.categoryId;
