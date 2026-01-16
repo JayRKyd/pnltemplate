@@ -1,6 +1,6 @@
 "use server";
 
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { stackServerApp } from "@/stack";
 
 export interface ExpenseAttachment {
@@ -54,7 +54,7 @@ export async function uploadAttachment(
   // Decode base64 and upload to storage
   const fileBuffer = Buffer.from(file.base64, "base64");
   
-  const { error: uploadError } = await supabase.storage
+  const { error: uploadError } = await supabaseAdmin.storage
     .from("expense-attachments")
     .upload(filePath, fileBuffer, {
       contentType: file.type,
@@ -109,7 +109,7 @@ export async function deleteAttachment(attachmentId: string): Promise<void> {
   }
 
   // Delete from storage
-  const { error: storageError } = await supabase.storage
+  const { error: storageError } = await supabaseAdmin.storage
     .from("expense-attachments")
     .remove([attachment.file_path]);
 
@@ -132,7 +132,7 @@ export async function deleteAttachment(attachmentId: string): Promise<void> {
 
 // Get signed URL for viewing/downloading attachment
 export async function getAttachmentUrl(filePath: string): Promise<string> {
-  const { data, error } = await supabase.storage
+  const { data, error } = await supabaseAdmin.storage
     .from("expense-attachments")
     .createSignedUrl(filePath, 3600); // 1 hour expiry
 
