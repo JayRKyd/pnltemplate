@@ -217,6 +217,7 @@ export async function cancelTeamInvite(inviteId: string, teamId: string) {
 }
 
 // Sync team membership to Supabase (call after user joins)
+// Only creates membership if it doesn't exist - preserves existing role
 export async function syncTeamMembership(teamId: string, role: string = "member") {
   console.log("[syncTeamMembership] Syncing membership for team", teamId);
   
@@ -225,17 +226,28 @@ export async function syncTeamMembership(teamId: string, role: string = "member"
     throw new Error("No user in session");
   }
 
+  // Check if membership already exists
+  const { data: existing } = await supabase
+    .from("team_memberships")
+    .select("*")
+    .eq("team_id", teamId)
+    .eq("user_id", user.id)
+    .single();
+
+  // If membership exists, return it without changing the role
+  if (existing) {
+    console.log("[syncTeamMembership] Membership exists, preserving role:", existing.role);
+    return existing;
+  }
+
+  // Only insert if no membership exists
   const { data, error } = await supabase
     .from("team_memberships")
-    .upsert(
-      {
-        team_id: teamId,
-        user_id: user.id,
-        role,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "team_id,user_id" }
-    )
+    .insert({
+      team_id: teamId,
+      user_id: user.id,
+      role,
+    })
     .select()
     .single();
 
@@ -244,7 +256,7 @@ export async function syncTeamMembership(teamId: string, role: string = "member"
     throw error;
   }
 
-  console.log("[syncTeamMembership] Synced:", data);
+  console.log("[syncTeamMembership] Created new membership:", data);
   return data;
 }
 
