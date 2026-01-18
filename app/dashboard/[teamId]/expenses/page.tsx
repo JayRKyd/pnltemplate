@@ -395,7 +395,7 @@ function PaymentStatusModal({ isOpen, onClose, onConfirm, supplierName, amount, 
         </p>
         
         <p className="text-gray-500 text-sm mb-8">
-          Statusul va fi schimbat din „{currentlyPaid ? 'Plătit' : 'Neplătit'}" în „{currentlyPaid ? 'Neplătit' : 'Plătit'}".
+          Statusul va fi schimbat din &ldquo;{currentlyPaid ? 'Plătit' : 'Neplătit'}&rdquo; în &ldquo;{currentlyPaid ? 'Neplătit' : 'Plătit'}&rdquo;.
         </p>
 
         <div className="flex gap-3">

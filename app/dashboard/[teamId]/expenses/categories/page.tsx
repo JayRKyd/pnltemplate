@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { Plus, Edit2, Trash2, ChevronRight, Loader2 } from "lucide-react";
 import {
@@ -30,11 +30,7 @@ export default function CategoriesPage() {
   // Flat list for parent dropdown
   const [flatCategories, setFlatCategories] = useState<ExpenseCategory[]>([]);
 
-  useEffect(() => {
-    loadCategories();
-  }, [params.teamId]);
-
-  const loadCategories = async () => {
+  const loadCategories = useCallback(async () => {
     if (!params.teamId) return;
     setLoading(true);
     try {
@@ -51,7 +47,11 @@ export default function CategoriesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [params.teamId]);
+
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
 
   const handleCreate = async () => {
     if (!formName.trim()) {

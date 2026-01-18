@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { getExpense, updateExpense, TeamExpense } from "@/app/actions/expenses";
@@ -46,11 +46,7 @@ export default function EditExpensePage() {
   const [subcategoryId, setSubcategoryId] = useState("");
   const [description, setDescription] = useState("");
 
-  useEffect(() => {
-    loadExpense();
-  }, [params.id, params.teamId]);
-
-  const loadExpense = async () => {
+  const loadExpense = useCallback(async () => {
     if (!params.id || !params.teamId) return;
 
     setLoading(true);
@@ -90,7 +86,11 @@ export default function EditExpensePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [params.id, params.teamId]);
+
+  useEffect(() => {
+    loadExpense();
+  }, [loadExpense]);
 
   const handleAmountChange = (value: string) => {
     setAmount(value);
