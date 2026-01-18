@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { File, FileText, Image, Download, Trash2, X, Loader2 } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { File, FileText, Image as ImageIcon, Download, Trash2, X, Loader2 } from "lucide-react";
 import {
   getExpenseAttachments,
   getAttachmentUrl,
@@ -23,11 +23,7 @@ export function AttachmentGallery({ expenseId, canDelete = false, onAttachmentDe
   const [previewType, setPreviewType] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadAttachments();
-  }, [expenseId]);
-
-  const loadAttachments = async () => {
+  const loadAttachments = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getExpenseAttachments(expenseId);
@@ -49,7 +45,11 @@ export function AttachmentGallery({ expenseId, canDelete = false, onAttachmentDe
     } finally {
       setLoading(false);
     }
-  };
+  }, [expenseId]);
+
+  useEffect(() => {
+    loadAttachments();
+  }, [loadAttachments]);
 
   const handleDelete = async (attachmentId: string) => {
     if (!confirm("Delete this attachment?")) return;
@@ -75,7 +75,7 @@ export function AttachmentGallery({ expenseId, canDelete = false, onAttachmentDe
   };
 
   const getFileIcon = (type: string | null) => {
-    if (type?.startsWith("image/")) return <Image size={24} className="text-blue-500" />;
+    if (type?.startsWith("image/")) return <ImageIcon size={24} className="text-blue-500" />;
     if (type === "application/pdf") return <FileText size={24} className="text-red-500" />;
     return <File size={24} className="text-gray-500" />;
   };
@@ -120,6 +120,7 @@ export function AttachmentGallery({ expenseId, canDelete = false, onAttachmentDe
                 onClick={() => openPreview(attachment)}
               >
                 {isImage && url ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
                   <img
                     src={url}
                     alt={attachment.file_name}
@@ -194,6 +195,7 @@ export function AttachmentGallery({ expenseId, canDelete = false, onAttachmentDe
             onClick={(e) => e.stopPropagation()}
           >
             {previewType?.startsWith("image/") ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
               <img src={previewUrl} alt="Preview" className="max-w-full h-auto" />
             ) : previewType === "application/pdf" ? (
               <iframe

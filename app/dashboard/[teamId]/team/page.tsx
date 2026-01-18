@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useUser } from "@stackframe/stack";
 import {
@@ -35,13 +35,7 @@ export default function TeamMembersPage() {
   const [inviteRole, setInviteRole] = useState("member");
   const [inviting, setInviting] = useState(false);
 
-  useEffect(() => {
-    if (params.teamId) {
-      loadData();
-    }
-  }, [params.teamId]);
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [membersData, invitesData] = await Promise.all([
@@ -56,7 +50,13 @@ export default function TeamMembersPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [params.teamId]);
+
+  useEffect(() => {
+    if (params.teamId) {
+      loadData();
+    }
+  }, [params.teamId, loadData]);
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();

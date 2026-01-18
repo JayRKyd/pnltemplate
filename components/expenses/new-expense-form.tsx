@@ -977,6 +977,7 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
               {uploadedFile ? (
                 <div className="w-full h-full flex flex-col items-center justify-center">
                   {uploadedFile.preview.startsWith("data:image") ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
                     <img
                       src={uploadedFile.preview}
                       alt="Document preview"

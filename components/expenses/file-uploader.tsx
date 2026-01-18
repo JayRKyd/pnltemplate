@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef } from "react";
-import { Upload, X, File, Image, FileText, Loader2 } from "lucide-react";
+import { Upload, X, File, Image as ImageIcon, FileText, Loader2 } from "lucide-react";
 
 export interface UploadedFile {
   id?: string;
@@ -139,7 +139,7 @@ export function FileUploader({
   };
 
   const getFileIcon = (type: string) => {
-    if (type.startsWith("image/")) return <Image size={20} className="text-blue-500" />;
+    if (type.startsWith("image/")) return <ImageIcon size={20} className="text-blue-500" />;
     if (type === "application/pdf") return <FileText size={20} className="text-red-500" />;
     return <File size={20} className="text-gray-500" />;
   };
@@ -206,6 +206,7 @@ export function FileUploader({
               className="flex items-center gap-3 p-3 rounded-lg border bg-gray-50 dark:bg-gray-800/50"
             >
               {file.preview ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                   src={file.preview}
                   alt={file.name}
