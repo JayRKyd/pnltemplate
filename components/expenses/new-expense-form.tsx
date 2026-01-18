@@ -317,95 +317,108 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     </div>
   );
 
+  // Mobile Form Row Component
+  const MobileFormRow = ({ 
+    label, 
+    children, 
+    noBorder = false 
+  }: { 
+    label: string; 
+    children: React.ReactNode; 
+    noBorder?: boolean;
+  }) => (
+    <div className={`flex items-center py-4 ${noBorder ? '' : 'border-b border-gray-100'}`}>
+      <span className="text-gray-500 text-sm w-24 flex-shrink-0">{label}</span>
+      <div className="flex-1">{children}</div>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-[#F8F9FA] p-4 md:p-6">
-      {/* Success Modal */}
-      {showSuccessModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center shadow-xl">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Check size={32} className="text-green-600" />
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Cheltuiala a fost trimisa!</h3>
-            <p className="text-gray-500 mb-6">Cheltuiala a fost salvata si trimisa pentru aprobare.</p>
-            <button
-              onClick={() => router.push(`/dashboard/${teamId}/expenses`)}
-              className="px-8 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all font-medium"
-            >
-              Inapoi la cheltuieli
+    <>
+      {/* ========== MOBILE VIEW ========== */}
+      <div className="md:hidden min-h-screen bg-white flex flex-col">
+        {/* Mobile Header */}
+        <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-4">
+            <button onClick={handleBack} className="p-1">
+              <X size={20} className="text-gray-600" />
             </button>
+            <h1 className="text-base font-semibold text-gray-900">Decont nou</h1>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" />
+            <div className="w-2.5 h-2.5 rounded-full bg-[#EF4444]" />
+            <div className="w-2.5 h-2.5 rounded-full bg-[#3B82F6]" />
           </div>
         </div>
-      )}
 
-      {/* Validation Error Toast */}
-      {validationError && (
-        <div className="fixed top-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-lg z-50 flex items-center gap-3">
-          <span>{validationError}</span>
-          <button onClick={() => setValidationError("")} className="text-red-500 hover:text-red-700">
-            <X size={18} />
-          </button>
-        </div>
-      )}
-
-      <div className="max-w-[1600px] mx-auto">
-        {/* Close Button - Above header */}
-        <button
-          onClick={handleBack}
-          className="mb-3 p-2 hover:bg-gray-100 rounded-full transition-colors"
-        >
-          <X size={20} className="text-gray-500" />
-        </button>
-
-        {/* Top Header Card */}
-        <div className="bg-white rounded-[24px] p-3 mb-4 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 flex-1">
-            {/* Furnizor Input */}
-            <div className="relative">
-              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                </svg>
-              </div>
+        {/* Mobile Form Content */}
+        <div className="flex-1 overflow-y-auto px-4">
+          {/* Document Upload */}
+          <MobileFormRow label="Document">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-gray-400 text-sm">
+                {uploadedFile ? uploadedFile.name : 'Incarcă'}
+              </span>
+              <Upload size={18} className="text-gray-400" />
               <input
-                type="text"
-                value={furnizor}
-                onChange={(e) => setFurnizor(e.target.value)}
-                placeholder="Furnizor"
-                className="pl-10 pr-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-300 transition-all shadow-sm w-64"
-                style={{ fontSize: "0.875rem", fontWeight: 400 }}
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={handleFileUpload}
+                className="hidden"
               />
-            </div>
+            </label>
+          </MobileFormRow>
 
-            {/* Doc Type Dropdown */}
-            <SelectDropdown
-              value={docType}
-              options={DOC_TYPES}
-              isOpen={showDocTypeDropdown}
-              onToggle={() => setShowDocTypeDropdown(!showDocTypeDropdown)}
-              onChange={setDocType}
+          {/* Furnizor */}
+          <MobileFormRow label="Furnizor">
+            <input
+              type="text"
+              value={furnizor}
+              onChange={(e) => setFurnizor(e.target.value)}
+              placeholder="Furnizor, coleg sau tag"
+              className="w-full bg-transparent text-gray-700 placeholder-gray-400 text-sm focus:outline-none"
             />
+          </MobileFormRow>
 
-            {/* NrDoc Input */}
+          {/* Tip Doc */}
+          <MobileFormRow label="Tip Doc">
+            <div className="relative">
+              <select
+                value={docType}
+                onChange={(e) => setDocType(e.target.value)}
+                className="w-full bg-transparent text-gray-700 text-sm focus:outline-none appearance-none cursor-pointer pr-6"
+              >
+                <option value="">Selecteaza</option>
+                {DOC_TYPES.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+              <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            </div>
+          </MobileFormRow>
+
+          {/* Nr. Doc */}
+          <MobileFormRow label="Nr. Doc">
             <input
               type="text"
               value={nrDoc}
               onChange={(e) => setNrDoc(e.target.value)}
-              placeholder="NrDoc"
-              className="px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-300 transition-all shadow-sm w-32"
-              style={{ fontSize: "0.875rem", fontWeight: 400 }}
+              placeholder="Numar"
+              className="w-full bg-transparent text-gray-700 placeholder-gray-400 text-sm focus:outline-none"
             />
+          </MobileFormRow>
 
-            {/* Date Picker */}
+          {/* Data Doc */}
+          <MobileFormRow label="Data Doc">
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setShowDatePicker(true)}
-                className="px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 hover:bg-gray-50 transition-all shadow-sm min-w-[120px]"
-                style={{ fontSize: "0.875rem", fontWeight: 400 }}
+                className="w-full text-left text-gray-700 text-sm flex items-center justify-between"
               >
-                {formatDateDisplay(selectedDate)}
+                <span>{selectedDate ? formatDateDisplay(selectedDate) : 'Selecteaza'}</span>
+                <ChevronDown size={16} className="text-gray-400" />
               </button>
               {showDatePicker && (
                 <CalendarModal
@@ -418,29 +431,341 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
                 />
               )}
             </div>
+          </MobileFormRow>
 
-            {/* Plata Dropdown */}
-            <SelectDropdown
-              value={plata}
-              options={PAYMENT_STATUS}
-              isOpen={showPlataDropdown}
-              onToggle={() => setShowPlataDropdown(!showPlataDropdown)}
-              onChange={setPlata}
+          {/* Plata */}
+          <MobileFormRow label="Plata">
+            <div className="relative">
+              <select
+                value={plata}
+                onChange={(e) => setPlata(e.target.value)}
+                className="w-full bg-transparent text-gray-700 text-sm focus:outline-none appearance-none cursor-pointer pr-6"
+              >
+                {PAYMENT_STATUS.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+              <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            </div>
+          </MobileFormRow>
+
+          {/* Divider */}
+          <div className="h-px bg-gray-200 my-2" />
+
+          {/* Descriere */}
+          <MobileFormRow label="Descriere">
+            <textarea
+              value={lines[0]?.descriere || ''}
+              onChange={(e) => updateLine(0, "descriere", e.target.value)}
+              placeholder="Adauga descriere..."
+              rows={3}
+              className="w-full bg-transparent text-gray-700 placeholder-gray-400 text-sm focus:outline-none resize-none"
             />
-          </div>
+          </MobileFormRow>
 
-          {/* Upload Document Button - Top Right */}
-          <label className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-600 hover:bg-gray-50 transition-all shadow-sm cursor-pointer ml-auto">
-            <span style={{ fontSize: "0.875rem", fontWeight: 400 }}>Incarcă document</span>
-            <Upload size={16} className="text-gray-400" />
+          {/* Divider */}
+          <div className="h-px bg-gray-200 my-2" />
+
+          {/* Suma cu TVA */}
+          <MobileFormRow label="Suma cu TVA">
+            <div className="flex items-center justify-between">
+              <input
+                type="text"
+                value={lines[0]?.sumaCuTVA || '0,00'}
+                onChange={(e) => updateLine(0, "sumaCuTVA", e.target.value)}
+                className="flex-1 bg-transparent text-gray-900 font-medium text-sm focus:outline-none"
+              />
+              <span className="text-gray-400 text-sm flex items-center gap-1">
+                Lei <span className="text-xs">🟡🔴</span>
+              </span>
+            </div>
+          </MobileFormRow>
+
+          {/* Suma fara TVA */}
+          <MobileFormRow label="Suma fara TVA">
+            <div className="flex items-center justify-between">
+              <input
+                type="text"
+                value={lines[0]?.sumaFaraTVA || '0,00'}
+                readOnly
+                className="flex-1 bg-transparent text-gray-900 font-medium text-sm focus:outline-none"
+              />
+              <span className="text-gray-400 text-sm flex items-center gap-1">
+                Lei <span className="text-xs">🟡🔴</span>
+              </span>
+            </div>
+          </MobileFormRow>
+
+          {/* TVA */}
+          <MobileFormRow label="TVA">
+            <div className="flex items-center justify-between">
+              <input
+                type="text"
+                value={lines[0]?.tva || '0,00'}
+                readOnly
+                className="flex-1 bg-transparent text-gray-500 text-sm focus:outline-none"
+              />
+              <span className="text-gray-400 text-sm flex items-center gap-1">
+                Lei <span className="text-xs">🟡🔴</span>
+              </span>
+            </div>
+          </MobileFormRow>
+
+          {/* Cota TVA */}
+          <MobileFormRow label="Cota TVA (%)">
+            <span className="text-gray-700 text-sm">{lines[0]?.cotaTVA || '0%'}</span>
+          </MobileFormRow>
+
+          {/* Luna P&L */}
+          <MobileFormRow label="Luna P&L">
+            <div className="relative">
+              <MonthYearPicker
+                value={lines[0]?.lunaP || ''}
+                onChange={(value) => updateLine(0, "lunaP", value)}
+              />
+            </div>
+          </MobileFormRow>
+
+          {/* Cont */}
+          <MobileFormRow label="Cont">
+            <div className="relative">
+              <select
+                value={lines[0]?.categoryId || ''}
+                onChange={(e) => {
+                  updateLine(0, "categoryId", e.target.value);
+                  updateLine(0, "subcategoryId", "");
+                }}
+                className="w-full bg-transparent text-gray-700 text-sm focus:outline-none appearance-none cursor-pointer pr-6"
+              >
+                <option value="">Select...</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
+              </select>
+              <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            </div>
+          </MobileFormRow>
+
+          {/* Subcont */}
+          <MobileFormRow label="Subcont">
+            <div className="relative">
+              <select
+                value={lines[0]?.subcategoryId || ''}
+                onChange={(e) => updateLine(0, "subcategoryId", e.target.value)}
+                disabled={!lines[0]?.categoryId}
+                className="w-full bg-transparent text-gray-400 text-sm focus:outline-none appearance-none cursor-pointer pr-6 disabled:opacity-50"
+              >
+                <option value="">Select...</option>
+                {getSubcategoriesForCategory(lines[0]?.categoryId || '').map((sub) => (
+                  <option key={sub.id} value={sub.id}>{sub.name}</option>
+                ))}
+              </select>
+              <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            </div>
+          </MobileFormRow>
+
+          {/* TVA Deductibil */}
+          <MobileFormRow label="TVA Deductibil">
+            <div className="relative">
+              <select
+                value={lines[0]?.tvaDeductibil || 'Nu'}
+                onChange={(e) => updateLine(0, "tvaDeductibil", e.target.value)}
+                className="w-full bg-transparent text-gray-700 text-sm focus:outline-none appearance-none cursor-pointer pr-6"
+              >
+                {TVA_DEDUCTIBIL_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+              <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            </div>
+          </MobileFormRow>
+
+          {/* Tags */}
+          <MobileFormRow label="Tags" noBorder>
             <input
-              type="file"
-              accept="image/*,application/pdf"
-              onChange={handleFileUpload}
-              className="hidden"
+              type="text"
+              value={lines[0]?.tags || ''}
+              onChange={(e) => updateLine(0, "tags", e.target.value)}
+              placeholder="#platitdeSOLO"
+              className="w-full bg-transparent text-gray-700 placeholder-gray-400 text-sm focus:outline-none"
             />
-          </label>
+          </MobileFormRow>
         </div>
+
+        {/* Mobile Bottom Buttons */}
+        <div className="px-4 py-4 border-t border-gray-100 space-y-3">
+          <button
+            type="button"
+            onClick={addLine}
+            className="w-full flex items-center justify-center gap-2 py-3 border border-gray-200 rounded-xl text-gray-600 text-sm font-medium"
+          >
+            <Plus size={18} />
+            Adaugă produs
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={loading}
+            className="w-full py-4 bg-gradient-to-r from-[#11C6B6] to-[#00BFA5] text-white rounded-full text-sm font-semibold disabled:opacity-50"
+          >
+            {loading ? "Se salveaza..." : "Salvează"}
+          </button>
+        </div>
+
+        {/* Mobile Success Modal */}
+        {showSuccessModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center shadow-xl">
+              <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Check size={28} className="text-green-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Cheltuiala a fost trimisa!</h3>
+              <p className="text-gray-500 text-sm mb-5">Cheltuiala a fost salvata si trimisa pentru aprobare.</p>
+              <button
+                onClick={() => router.push(`/dashboard/${teamId}/expenses`)}
+                className="w-full py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all font-medium text-sm"
+              >
+                Inapoi la cheltuieli
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Validation Error */}
+        {validationError && (
+          <div className="fixed top-4 left-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-lg z-50 flex items-center gap-3">
+            <span className="text-sm flex-1">{validationError}</span>
+            <button onClick={() => setValidationError("")} className="text-red-500 hover:text-red-700">
+              <X size={18} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ========== DESKTOP VIEW ========== */}
+      <div className="hidden md:block min-h-screen bg-[#F8F9FA] p-4 md:p-6">
+        {/* Success Modal */}
+        {showSuccessModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center shadow-xl">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Check size={32} className="text-green-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Cheltuiala a fost trimisa!</h3>
+              <p className="text-gray-500 mb-6">Cheltuiala a fost salvata si trimisa pentru aprobare.</p>
+              <button
+                onClick={() => router.push(`/dashboard/${teamId}/expenses`)}
+                className="px-8 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all font-medium"
+              >
+                Inapoi la cheltuieli
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Validation Error Toast */}
+        {validationError && (
+          <div className="fixed top-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-lg z-50 flex items-center gap-3">
+            <span>{validationError}</span>
+            <button onClick={() => setValidationError("")} className="text-red-500 hover:text-red-700">
+              <X size={18} />
+            </button>
+          </div>
+        )}
+
+        <div className="max-w-[1600px] mx-auto">
+          {/* Close Button - Above header */}
+          <button
+            onClick={handleBack}
+            className="mb-3 p-2 hover:bg-gray-100 rounded-full transition-colors"
+          >
+            <X size={20} className="text-gray-500" />
+          </button>
+
+          {/* Top Header Card */}
+          <div className="bg-white rounded-[24px] p-3 mb-4 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 flex-1">
+              {/* Furnizor Input */}
+              <div className="relative">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                </div>
+                <input
+                  type="text"
+                  value={furnizor}
+                  onChange={(e) => setFurnizor(e.target.value)}
+                  placeholder="Furnizor"
+                  className="pl-10 pr-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-300 transition-all shadow-sm w-64"
+                  style={{ fontSize: "0.875rem", fontWeight: 400 }}
+                />
+              </div>
+
+              {/* Doc Type Dropdown */}
+              <SelectDropdown
+                value={docType}
+                options={DOC_TYPES}
+                isOpen={showDocTypeDropdown}
+                onToggle={() => setShowDocTypeDropdown(!showDocTypeDropdown)}
+                onChange={setDocType}
+              />
+
+              {/* NrDoc Input */}
+              <input
+                type="text"
+                value={nrDoc}
+                onChange={(e) => setNrDoc(e.target.value)}
+                placeholder="NrDoc"
+                className="px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-300 transition-all shadow-sm w-32"
+                style={{ fontSize: "0.875rem", fontWeight: 400 }}
+              />
+
+              {/* Date Picker */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowDatePicker(true)}
+                  className="px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 hover:bg-gray-50 transition-all shadow-sm min-w-[120px]"
+                  style={{ fontSize: "0.875rem", fontWeight: 400 }}
+                >
+                  {formatDateDisplay(selectedDate)}
+                </button>
+                {showDatePicker && (
+                  <CalendarModal
+                    selectedDate={selectedDate}
+                    onDateSelect={(date) => {
+                      setSelectedDate(date);
+                      setShowDatePicker(false);
+                    }}
+                    onClose={() => setShowDatePicker(false)}
+                  />
+                )}
+              </div>
+
+              {/* Plata Dropdown */}
+              <SelectDropdown
+                value={plata}
+                options={PAYMENT_STATUS}
+                isOpen={showPlataDropdown}
+                onToggle={() => setShowPlataDropdown(!showPlataDropdown)}
+                onChange={setPlata}
+              />
+            </div>
+
+            {/* Upload Document Button - Top Right */}
+            <label className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-600 hover:bg-gray-50 transition-all shadow-sm cursor-pointer ml-auto">
+              <span style={{ fontSize: "0.875rem", fontWeight: 400 }}>Incarcă document</span>
+              <Upload size={16} className="text-gray-400" />
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+          </div>
 
         {/* Main Content - Two Separate Columns */}
         <div className="flex gap-4 mb-4 items-start">
@@ -687,28 +1012,29 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
           </div>
         </div>
 
-        {/* Bottom Buttons - Outside cards */}
-        <div className="w-[480px] flex items-center gap-4 mt-2 mb-6">
-          <button
-            type="button"
-            onClick={addLine}
-            className="flex items-center gap-2 px-8 py-3 bg-white border border-teal-500 text-gray-700 rounded-full hover:bg-teal-50 transition-all shadow-sm w-[48%]"
-            style={{ fontSize: "0.9375rem", fontWeight: 500 }}
-          >
-            Adauga produs
-            <Plus size={18} className="ml-auto" />
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={loading}
-            className="px-12 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all shadow-sm disabled:opacity-50 w-[48%]"
-            style={{ fontSize: "0.9375rem", fontWeight: 600 }}
-          >
-            {loading ? "Se salveaza..." : "Salveaza"}
-          </button>
+          {/* Bottom Buttons - Outside cards */}
+          <div className="w-[480px] flex items-center gap-4 mt-2 mb-6">
+            <button
+              type="button"
+              onClick={addLine}
+              className="flex items-center gap-2 px-8 py-3 bg-white border border-teal-500 text-gray-700 rounded-full hover:bg-teal-50 transition-all shadow-sm w-[48%]"
+              style={{ fontSize: "0.9375rem", fontWeight: 500 }}
+            >
+              Adauga produs
+              <Plus size={18} className="ml-auto" />
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={loading}
+              className="px-12 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all shadow-sm disabled:opacity-50 w-[48%]"
+              style={{ fontSize: "0.9375rem", fontWeight: 600 }}
+            >
+              {loading ? "Se salveaza..." : "Salveaza"}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

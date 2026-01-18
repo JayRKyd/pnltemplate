@@ -1,7 +1,7 @@
 'use client';
 
 import SidebarLayout, { SidebarItem } from "@/components/sidebar-layout";
-import { SelectedTeamSwitcher, useUser } from "@stackframe/stack";
+import { useUser } from "@stackframe/stack";
 import {
   BarChart4,
   FileBarChart,
@@ -96,14 +96,12 @@ export default function Layout(props: { children: React.ReactNode }) {
     <SidebarLayout 
       items={navigationItems}
       basePath={`/dashboard/${team.id}`}
-      sidebarTop={<SelectedTeamSwitcher 
-        selectedTeam={team}
-        urlMap={(team) => `/dashboard/${team.id}`}
-      />}
       baseBreadcrumb={[{
         title: team.displayName,
         href: `/dashboard/${team.id}`,
       }]}
+      currentTeam={team}
+      hideSidebar={true}
     >
       <UpsertUserOnMount />
       {props.children}

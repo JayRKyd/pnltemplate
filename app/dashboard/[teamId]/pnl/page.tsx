@@ -12,19 +12,11 @@ export default function PnlPage() {
 
   return (
     <div className="p-6 md:p-8 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">P&amp;L Statement</h2>
-          <p className="text-sm text-muted-foreground">
-            Mock P&amp;L with tabs (expenses, budget, delta).
-          </p>
-        </div>
-        <button
-          onClick={() => router.push(`/dashboard/${params.teamId}/budget`)}
-          className="rounded-md border px-3 py-2 text-sm"
-        >
-          Budget
-        </button>
+      <div>
+        <h2 className="text-2xl font-bold">P&amp;L Statement</h2>
+        <p className="text-sm text-muted-foreground">
+          Mock P&amp;L with tabs (expenses, budget, delta).
+        </p>
       </div>
 
       <PLStatement

@@ -39,14 +39,28 @@ export function CustomSelect({
     }
   };
 
+  // Check if custom classes override defaults
+  const hasCustomWidth = className.includes('w-[') || className.includes('w-full');
+  const hasCustomRounding = className.includes('rounded-');
+  const hasCustomPadding = className.includes('px-') || className.includes('py-') || className.includes('p-');
+  const hasCustomBorder = className.includes('border-gray-') || className.includes('border-white');
+
+  const baseClasses = [
+    !hasCustomWidth && 'w-full',
+    !hasCustomRounding && 'rounded-md',
+    'border',
+    !hasCustomPadding && 'px-3 py-2',
+    'text-sm outline-none focus:ring-2 focus:ring-teal-500',
+    !hasCustomBorder && (hasError ? 'border-red-500' : 'border-gray-300'),
+    hasError && hasCustomBorder && 'border-red-500',
+  ].filter(Boolean).join(' ');
+
   return (
     <select
       multiple={isMultiple}
       value={normalizedValue}
       onChange={handleChange}
-      className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 ${
-        hasError ? "border-red-500" : "border-gray-300"
-      } ${className}`}
+      className={`${baseClasses} ${className}`}
       style={style}
     >
       {!isMultiple && (
