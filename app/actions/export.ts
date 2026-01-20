@@ -34,7 +34,7 @@ export async function exportPnlToExcel(
     const wb = XLSX.utils.book_new();
 
     // ========== Sheet 1: P&L Summary ==========
-    const summaryData = [
+    const summaryData: (string | number)[][] = [
       ["P&L Summary - " + year],
       [],
       ["Luna", "Venituri", "Cheltuieli", "Budget", "Profit", "Delta (Budget - Cheltuieli)"],
@@ -79,7 +79,7 @@ export async function exportPnlToExcel(
     XLSX.utils.book_append_sheet(wb, wsSummary, "P&L Summary");
 
     // ========== Sheet 2: Expenses by Category ==========
-    const categoryData = [
+    const categoryData: (string | number)[][] = [
       ["Cheltuieli pe Categorii - " + year],
       [],
       ["Categorie", "Subcategorie", "Total (RON)", "Nr. Cheltuieli"],
@@ -122,7 +122,7 @@ export async function exportPnlToExcel(
     XLSX.utils.book_append_sheet(wb, wsCategory, "Expenses by Category");
 
     // ========== Sheet 3: Budget Detail ==========
-    const budgetData = [
+    const budgetData: (string | number)[][] = [
       ["Budget - " + year],
       [],
       ["Categorie", "Subcategorie", ...MONTH_NAMES, "Total Anual"],
@@ -147,7 +147,7 @@ export async function exportPnlToExcel(
     XLSX.utils.book_append_sheet(wb, wsBudget, "Budget");
 
     // ========== Sheet 4: Revenue Detail ==========
-    const revenueData = [
+    const revenueData: (string | number)[][] = [
       ["Venituri - " + year],
       [],
       ["Luna", "Suma (RON)", "Descriere", "Sursa"],
@@ -221,8 +221,8 @@ export async function exportExpensesToExcel(
         doc_number,
         doc_type,
         tags,
-        category:expense_categories!team_expenses_category_id_fkey(name),
-        subcategory:expense_categories!team_expenses_subcategory_id_fkey(name)
+        category:team_expense_categories!fk_expense_category(name),
+        subcategory:team_expense_categories!fk_expense_subcategory(name)
       `)
       .eq("team_id", teamId)
       .is("deleted_at", null)
@@ -240,7 +240,7 @@ export async function exportExpensesToExcel(
       return true;
     }) || [];
 
-    const exportData = [
+    const exportData: (string | number | boolean)[][] = [
       ["Cheltuieli - " + year + (month ? ` / ${MONTH_NAMES[month - 1]}` : "")],
       [],
       [
