@@ -319,7 +319,7 @@ export async function getExpenseFilterForRole(teamId: string): Promise<{
 }
 
 // Get list of available roles for assignment (admin function)
-export function getAvailableRoles(): { value: UserRole; label: string; description: string }[] {
+export async function getAvailableRoles(): Promise<{ value: UserRole; label: string; description: string }[]> {
   return [
     { value: "admin", label: "Admin", description: "Full access to all features" },
     { value: "approver", label: "Approver", description: "Can approve/reject expenses" },
