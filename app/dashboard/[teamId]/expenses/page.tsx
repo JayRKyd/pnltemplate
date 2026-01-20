@@ -731,40 +731,40 @@ export default function ExpensesPage() {
         </div>
 
         {/* Search Input */}
-        <div className="relative">
+            <div className="relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
             placeholder={activeTab === 'cheltuieli' ? "Furnizor, coleg sau tag" : "Cauta dupa companie sau coleg"}
             className="w-72 pl-11 pr-4 py-2.5 rounded-full border border-gray-200 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-white"
-          />
-        </div>
-      </div>
+              />
+            </div>
+          </div>
 
       {error && (
         <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
           {error}
-        </div>
+          </div>
       )}
 
       {/* Cheltuieli Table */}
       {activeTab === 'cheltuieli' && (
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
-          {loading ? (
+        {loading ? (
             <div className="p-12 text-center text-gray-500">Se incarca...</div>
           ) : paginatedExpenses.length === 0 ? (
             <div className="p-12 text-center">
               <p className="text-gray-500 mb-4">Nu exista cheltuieli</p>
-              <button
-                onClick={() => router.push(`/dashboard/${params.teamId}/expenses/new`)}
+            <button
+              onClick={() => router.push(`/dashboard/${params.teamId}/expenses/new`)}
                 className="text-teal-600 hover:underline font-medium"
-              >
+            >
                 Creeaza prima cheltuiala
-              </button>
-            </div>
-          ) : (
+            </button>
+          </div>
+        ) : (
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-100" style={{ backgroundColor: '#D1FAE5' }}>
@@ -833,15 +833,15 @@ export default function ExpensesPage() {
                       <SortIcon active={sortColumn === 'payment_status'} direction={sortDirection} />
                     </div>
                   </th>
-                </tr>
-              </thead>
+              </tr>
+            </thead>
               <tbody className="divide-y divide-gray-50">
                 {paginatedExpenses.map((expense) => (
-                  <tr 
+                <tr
                     key={expense.id} 
                     className="hover:bg-gray-50/50 transition-colors cursor-pointer"
                     onClick={() => router.push(`/dashboard/${params.teamId}/expenses/${expense.id}`)}
-                  >
+                >
                     <td className="px-6 py-4">
                       <StatusBadge status={expense.status} />
                     </td>
@@ -850,21 +850,21 @@ export default function ExpensesPage() {
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
                       {expense.doc_type || 'Factura'}
-                    </td>
+                  </td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">
                       {expense.supplier || '-'}
-                    </td>
+                  </td>
                     <td className="px-6 py-4 text-sm text-gray-500 max-w-[250px] truncate">
                       {expense.description || '-'}
-                    </td>
+                  </td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-900 text-right">
                       {formatDisplayAmount(expense.amount || 0)}
-                    </td>
+                  </td>
                     <td className="px-6 py-4">
                       <div 
                         className="flex justify-center"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                      onClick={(e) => {
+                        e.stopPropagation();
                           setPaymentModalData({
                             isOpen: true,
                             expenseId: expense.id,
@@ -872,19 +872,19 @@ export default function ExpensesPage() {
                             amount: expense.amount || 0,
                             currentlyPaid: expense.status === 'paid',
                           });
-                        }}
+                      }}
                       >
                         <button className="hover:scale-110 transition-transform">
                           <PaymentIcon paid={expense.status === 'paid'} />
-                        </button>
+                    </button>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
       )}
 
       {/* Recurente Table */}

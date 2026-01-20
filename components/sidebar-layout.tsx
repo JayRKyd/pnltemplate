@@ -182,9 +182,9 @@ function SidebarContent(props: {
   return (
     <div className="flex flex-col h-full items-stretch">
       {props.sidebarTop && (
-        <div className="h-14 flex items-center px-2 shrink-0 mr-10 md:mr-0 border-b">
-          {props.sidebarTop}
-        </div>
+      <div className="h-14 flex items-center px-2 shrink-0 mr-10 md:mr-0 border-b">
+        {props.sidebarTop}
+      </div>
       )}
       <div className="flex flex-grow flex-col gap-2 pt-4 overflow-y-auto">
         {props.items.map((item, index) => {
@@ -273,33 +273,33 @@ export default function SidebarLayout(props: {
             {/* Mobile menu - only show if sidebar is not hidden */}
             {!props.hideSidebar && (
               <div className="flex md:hidden">
-                <Sheet
-                  onOpenChange={(open) => setSidebarOpen(open)}
-                  open={sidebarOpen}
-                >
-                  <SheetTrigger>
+            <Sheet
+              onOpenChange={(open) => setSidebarOpen(open)}
+              open={sidebarOpen}
+            >
+              <SheetTrigger>
                     <div className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
                       <Menu size={20} className="text-gray-500" />
                     </div>
-                  </SheetTrigger>
-                  <SheetContent side="left" className="w-[240px] p-0">
-                    <SidebarContent
-                      onNavigate={() => setSidebarOpen(false)}
-                      items={props.items}
-                      sidebarTop={props.sidebarTop}
-                      basePath={props.basePath}
-                    />
-                  </SheetContent>
-                </Sheet>
-              </div>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-[240px] p-0">
+                <SidebarContent
+                  onNavigate={() => setSidebarOpen(false)}
+                  items={props.items}
+                  sidebarTop={props.sidebarTop}
+                  basePath={props.basePath}
+                />
+              </SheetContent>
+            </Sheet>
+            </div>
             )}
 
-            <UserDropdown
-              colorModeToggle={() =>
-                setTheme(resolvedTheme === "light" ? "dark" : "light")
-              }
-            />
-          </div>
+          <UserDropdown
+            colorModeToggle={() =>
+              setTheme(resolvedTheme === "light" ? "dark" : "light")
+            }
+          />
+        </div>
         </div>
       </div>
 
@@ -314,7 +314,7 @@ export default function SidebarLayout(props: {
         
         {/* Content */}
         <div className="flex flex-col flex-grow w-0">
-          <div className="flex-grow">{props.children}</div>
+        <div className="flex-grow">{props.children}</div>
         </div>
       </div>
     </div>

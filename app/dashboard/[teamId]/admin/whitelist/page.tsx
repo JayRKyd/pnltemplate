@@ -1,14 +1,14 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { PnlDashboard } from "@/components/pnl/pnl-dashboard";
+import { WhitelistManagement } from "@/components/admin/whitelist-management";
 
-export default function PnlPage() {
+export default function WhitelistPage() {
   const params = useParams<{ teamId: string }>();
 
   return (
     <div className="p-6 md:p-8">
-      <PnlDashboard teamId={params.teamId} />
+      <WhitelistManagement teamId={params.teamId} />
     </div>
   );
 }

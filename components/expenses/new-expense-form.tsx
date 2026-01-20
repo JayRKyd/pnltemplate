@@ -644,128 +644,128 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
 
       {/* ========== DESKTOP VIEW ========== */}
       <div className="hidden md:block min-h-screen bg-[#F8F9FA] p-4 md:p-6">
-        {/* Success Modal */}
-        {showSuccessModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center shadow-xl">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Check size={32} className="text-green-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Cheltuiala a fost trimisa!</h3>
-              <p className="text-gray-500 mb-6">Cheltuiala a fost salvata si trimisa pentru aprobare.</p>
-              <button
-                onClick={() => router.push(`/dashboard/${teamId}/expenses`)}
-                className="px-8 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all font-medium"
-              >
-                Inapoi la cheltuieli
-              </button>
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center shadow-xl">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Check size={32} className="text-green-600" />
             </div>
-          </div>
-        )}
-
-        {/* Validation Error Toast */}
-        {validationError && (
-          <div className="fixed top-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-lg z-50 flex items-center gap-3">
-            <span>{validationError}</span>
-            <button onClick={() => setValidationError("")} className="text-red-500 hover:text-red-700">
-              <X size={18} />
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Cheltuiala a fost trimisa!</h3>
+            <p className="text-gray-500 mb-6">Cheltuiala a fost salvata si trimisa pentru aprobare.</p>
+            <button
+              onClick={() => router.push(`/dashboard/${teamId}/expenses`)}
+              className="px-8 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all font-medium"
+            >
+              Inapoi la cheltuieli
             </button>
           </div>
-        )}
+        </div>
+      )}
 
-        <div className="max-w-[1600px] mx-auto">
-          {/* Close Button - Above header */}
-          <button
-            onClick={handleBack}
-            className="mb-3 p-2 hover:bg-gray-100 rounded-full transition-colors"
-          >
-            <X size={20} className="text-gray-500" />
+      {/* Validation Error Toast */}
+      {validationError && (
+        <div className="fixed top-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-lg z-50 flex items-center gap-3">
+          <span>{validationError}</span>
+          <button onClick={() => setValidationError("")} className="text-red-500 hover:text-red-700">
+            <X size={18} />
           </button>
+        </div>
+      )}
 
-          {/* Top Header Card */}
-          <div className="bg-white rounded-[24px] p-3 mb-4 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 flex-1">
-              {/* Furnizor Input */}
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                  </svg>
-                </div>
-                <input
-                  type="text"
-                  value={furnizor}
-                  onChange={(e) => setFurnizor(e.target.value)}
-                  placeholder="Furnizor"
-                  className="pl-10 pr-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-300 transition-all shadow-sm w-64"
-                  style={{ fontSize: "0.875rem", fontWeight: 400 }}
-                />
+      <div className="max-w-[1600px] mx-auto">
+        {/* Close Button - Above header */}
+        <button
+          onClick={handleBack}
+          className="mb-3 p-2 hover:bg-gray-100 rounded-full transition-colors"
+        >
+          <X size={20} className="text-gray-500" />
+        </button>
+
+        {/* Top Header Card */}
+        <div className="bg-white rounded-[24px] p-3 mb-4 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 flex-1">
+            {/* Furnizor Input */}
+            <div className="relative">
+              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
               </div>
-
-              {/* Doc Type Dropdown */}
-              <SelectDropdown
-                value={docType}
-                options={DOC_TYPES}
-                isOpen={showDocTypeDropdown}
-                onToggle={() => setShowDocTypeDropdown(!showDocTypeDropdown)}
-                onChange={setDocType}
-              />
-
-              {/* NrDoc Input */}
               <input
                 type="text"
-                value={nrDoc}
-                onChange={(e) => setNrDoc(e.target.value)}
-                placeholder="NrDoc"
-                className="px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-300 transition-all shadow-sm w-32"
+                value={furnizor}
+                onChange={(e) => setFurnizor(e.target.value)}
+                placeholder="Furnizor"
+                className="pl-10 pr-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-300 transition-all shadow-sm w-64"
                 style={{ fontSize: "0.875rem", fontWeight: 400 }}
-              />
-
-              {/* Date Picker */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setShowDatePicker(true)}
-                  className="px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 hover:bg-gray-50 transition-all shadow-sm min-w-[120px]"
-                  style={{ fontSize: "0.875rem", fontWeight: 400 }}
-                >
-                  {formatDateDisplay(selectedDate)}
-                </button>
-                {showDatePicker && (
-                  <CalendarModal
-                    selectedDate={selectedDate}
-                    onDateSelect={(date) => {
-                      setSelectedDate(date);
-                      setShowDatePicker(false);
-                    }}
-                    onClose={() => setShowDatePicker(false)}
-                  />
-                )}
-              </div>
-
-              {/* Plata Dropdown */}
-              <SelectDropdown
-                value={plata}
-                options={PAYMENT_STATUS}
-                isOpen={showPlataDropdown}
-                onToggle={() => setShowPlataDropdown(!showPlataDropdown)}
-                onChange={setPlata}
               />
             </div>
 
-            {/* Upload Document Button - Top Right */}
-            <label className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-600 hover:bg-gray-50 transition-all shadow-sm cursor-pointer ml-auto">
-              <span style={{ fontSize: "0.875rem", fontWeight: 400 }}>Incarcă document</span>
-              <Upload size={16} className="text-gray-400" />
-              <input
-                type="file"
-                accept="image/*,application/pdf"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-            </label>
+            {/* Doc Type Dropdown */}
+            <SelectDropdown
+              value={docType}
+              options={DOC_TYPES}
+              isOpen={showDocTypeDropdown}
+              onToggle={() => setShowDocTypeDropdown(!showDocTypeDropdown)}
+              onChange={setDocType}
+            />
+
+            {/* NrDoc Input */}
+            <input
+              type="text"
+              value={nrDoc}
+              onChange={(e) => setNrDoc(e.target.value)}
+              placeholder="NrDoc"
+              className="px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-300 transition-all shadow-sm w-32"
+              style={{ fontSize: "0.875rem", fontWeight: 400 }}
+            />
+
+            {/* Date Picker */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowDatePicker(true)}
+                className="px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 hover:bg-gray-50 transition-all shadow-sm min-w-[120px]"
+                style={{ fontSize: "0.875rem", fontWeight: 400 }}
+              >
+                {formatDateDisplay(selectedDate)}
+              </button>
+              {showDatePicker && (
+                <CalendarModal
+                  selectedDate={selectedDate}
+                  onDateSelect={(date) => {
+                    setSelectedDate(date);
+                    setShowDatePicker(false);
+                  }}
+                  onClose={() => setShowDatePicker(false)}
+                />
+              )}
+            </div>
+
+            {/* Plata Dropdown */}
+            <SelectDropdown
+              value={plata}
+              options={PAYMENT_STATUS}
+              isOpen={showPlataDropdown}
+              onToggle={() => setShowPlataDropdown(!showPlataDropdown)}
+              onChange={setPlata}
+            />
           </div>
+
+          {/* Upload Document Button - Top Right */}
+          <label className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-600 hover:bg-gray-50 transition-all shadow-sm cursor-pointer ml-auto">
+            <span style={{ fontSize: "0.875rem", fontWeight: 400 }}>Incarcă document</span>
+            <Upload size={16} className="text-gray-400" />
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+          </label>
+        </div>
 
         {/* Main Content - Two Separate Columns */}
         <div className="flex gap-4 mb-4 items-start">
@@ -1013,29 +1013,29 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
           </div>
         </div>
 
-          {/* Bottom Buttons - Outside cards */}
-          <div className="w-[480px] flex items-center gap-4 mt-2 mb-6">
-            <button
-              type="button"
-              onClick={addLine}
-              className="flex items-center gap-2 px-8 py-3 bg-white border border-teal-500 text-gray-700 rounded-full hover:bg-teal-50 transition-all shadow-sm w-[48%]"
-              style={{ fontSize: "0.9375rem", fontWeight: 500 }}
-            >
-              Adauga produs
-              <Plus size={18} className="ml-auto" />
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={loading}
-              className="px-12 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all shadow-sm disabled:opacity-50 w-[48%]"
-              style={{ fontSize: "0.9375rem", fontWeight: 600 }}
-            >
-              {loading ? "Se salveaza..." : "Salveaza"}
-            </button>
-          </div>
+        {/* Bottom Buttons - Outside cards */}
+        <div className="w-[480px] flex items-center gap-4 mt-2 mb-6">
+          <button
+            type="button"
+            onClick={addLine}
+            className="flex items-center gap-2 px-8 py-3 bg-white border border-teal-500 text-gray-700 rounded-full hover:bg-teal-50 transition-all shadow-sm w-[48%]"
+            style={{ fontSize: "0.9375rem", fontWeight: 500 }}
+          >
+            Adauga produs
+            <Plus size={18} className="ml-auto" />
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={loading}
+            className="px-12 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all shadow-sm disabled:opacity-50 w-[48%]"
+            style={{ fontSize: "0.9375rem", fontWeight: 600 }}
+          >
+            {loading ? "Se salveaza..." : "Salveaza"}
+          </button>
         </div>
       </div>
+    </div>
     </>
   );
 }
