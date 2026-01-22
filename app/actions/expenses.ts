@@ -24,6 +24,7 @@ export interface TeamExpense {
   status: string;
   payment_status: string;
   supplier: string | null;
+  supplier_cui: string | null;
   description: string | null;
   category: string | null;
   category_id: string | null;
@@ -55,6 +56,7 @@ export interface ExpenseInput {
   responsibleId?: string;
   tags?: string[];
   supplier?: string;
+  supplierCui?: string;
   description?: string;
   categoryId?: string;
   subcategoryId?: string;
@@ -198,6 +200,7 @@ export async function createExpense(input: ExpenseInput): Promise<TeamExpense> {
       responsible_id: input.responsibleId ?? null,
       tags: input.tags ?? null,
       supplier: input.supplier ?? null,
+      supplier_cui: input.supplierCui ?? null,
       description: input.description ?? null,
       category_id: input.categoryId ?? null,
       subcategory_id: input.subcategoryId ?? null,
@@ -259,6 +262,7 @@ export async function createMultiLineExpense(
         responsible_id: input.responsibleId ?? null,
         tags: input.tags ?? null,
         supplier: input.supplier ?? null,
+        supplier_cui: input.supplierCui ?? null,
         description: line.description ?? null,
         category_id: line.categoryId ?? null,
         subcategory_id: line.subcategoryId ?? null,
@@ -314,6 +318,7 @@ export async function updateExpense(
   if (updates.responsibleId !== undefined) updateData.responsible_id = updates.responsibleId;
   if (updates.tags !== undefined) updateData.tags = updates.tags;
   if (updates.supplier !== undefined) updateData.supplier = updates.supplier;
+  if (updates.supplierCui !== undefined) updateData.supplier_cui = updates.supplierCui;
   if (updates.description !== undefined) updateData.description = updates.description;
   if (updates.categoryId !== undefined) updateData.category_id = updates.categoryId;
   if (updates.subcategoryId !== undefined) updateData.subcategory_id = updates.subcategoryId;

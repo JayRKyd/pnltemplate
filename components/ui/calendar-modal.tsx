@@ -7,9 +7,11 @@ interface CalendarModalProps {
   selectedDate: Date;
   onDateSelect: (date: Date) => void;
   onClose: () => void;
+  minDate?: Date;
+  maxDate?: Date;
 }
 
-export function CalendarModal({ selectedDate, onDateSelect, onClose }: CalendarModalProps) {
+export function CalendarModal({ selectedDate, onDateSelect, onClose, minDate, maxDate }: CalendarModalProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date(selectedDate));
 
   const monthNames = [
@@ -41,6 +43,12 @@ export function CalendarModal({ selectedDate, onDateSelect, onClose }: CalendarM
     onClose();
   };
 
+  const isDateDisabled = (date: Date): boolean => {
+    if (minDate && date < new Date(minDate.setHours(0, 0, 0, 0))) return true;
+    if (maxDate && date > new Date(maxDate.setHours(23, 59, 59, 999))) return true;
+    return false;
+  };
+
   const renderCalendarDays = () => {
     const daysInMonth = getDaysInMonth(currentMonth);
     const firstDay = getFirstDayOfMonth(currentMonth);
@@ -56,14 +64,16 @@ export function CalendarModal({ selectedDate, onDateSelect, onClose }: CalendarM
       const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
       const isSelected = date.toDateString() === selectedDate.toDateString();
       const isToday = date.toDateString() === new Date().toDateString();
+      const isDisabled = isDateDisabled(date);
 
       days.push(
         <button
           key={day}
-          onClick={() => handleDateClick(day)}
+          onClick={() => !isDisabled && handleDateClick(day)}
+          disabled={isDisabled}
           className={`w-10 h-10 flex items-center justify-center rounded-full text-sm transition-all
-            ${isSelected ? 'bg-teal-500 text-white shadow-md' : 'text-gray-700 hover:bg-gray-100'}
-            ${isToday && !isSelected ? 'text-teal-600 font-semibold' : ''}
+            ${isSelected ? 'bg-teal-500 text-white shadow-md' : isDisabled ? 'text-gray-300 cursor-not-allowed' : 'text-gray-700 hover:bg-gray-100'}
+            ${isToday && !isSelected && !isDisabled ? 'text-teal-600 font-semibold' : ''}
           `}
         >
           {day}
