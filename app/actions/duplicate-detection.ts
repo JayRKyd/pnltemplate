@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { supabase } from "@/lib/supabase";
 
 export interface PotentialDuplicate {
   id: string;
@@ -29,8 +29,6 @@ export async function checkForDuplicates(
   },
   excludeExpenseId?: string
 ): Promise<PotentialDuplicate[]> {
-  const supabase = await createClient();
-
   // Need at least one field to check
   if (!expense.docNumber && !expense.supplier && !expense.expenseDate && !expense.amountWithVat) {
     return [];

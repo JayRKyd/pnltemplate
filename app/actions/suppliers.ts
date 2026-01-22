@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { supabase } from "@/lib/supabase";
 
 // Romanian company data from ANAF API (openapi.ro as proxy)
 interface ANAFCompanyResult {
@@ -35,7 +35,6 @@ export async function searchSuppliers(
   const results: SupplierSearchResult[] = [];
 
   // First, search in our local database for previously used suppliers
-  const supabase = await createClient();
   const { data: localSuppliers } = await supabase
     .from("team_expenses")
     .select("supplier, supplier_cui")

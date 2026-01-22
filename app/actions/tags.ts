@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { supabase } from "@/lib/supabase";
 
 export interface TagSuggestion {
   tag: string;
@@ -13,8 +13,6 @@ export async function getTagSuggestions(
   query: string,
   teamId: string
 ): Promise<TagSuggestion[]> {
-  const supabase = await createClient();
-
   // Get all expenses with tags for this team
   const { data: expenses } = await supabase
     .from("team_expenses")
@@ -57,8 +55,6 @@ export async function getTagSuggestions(
 
 // Get all unique tags for a team
 export async function getAllTeamTags(teamId: string): Promise<string[]> {
-  const supabase = await createClient();
-
   const { data: expenses } = await supabase
     .from("team_expenses")
     .select("tags")
