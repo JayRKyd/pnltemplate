@@ -9,7 +9,8 @@ import { CalendarModal } from "@/components/ui/calendar-modal";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
 import { getCategoryTree, CategoryWithChildren } from "@/app/actions/categories";
 import { searchSuppliers, SupplierSearchResult } from "@/app/actions/suppliers";
-import { getTagSuggestions, TagSuggestion, validateTags } from "@/app/actions/tags";
+import { getTagSuggestions, TagSuggestion } from "@/app/actions/tags";
+import { validateTags } from "@/lib/utils/tags";
 import { checkForDuplicates, PotentialDuplicate, formatDuplicateWarning } from "@/app/actions/duplicate-detection";
 
 // Updated doc types as per spec
