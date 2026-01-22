@@ -1,17 +1,10 @@
 "use server";
 
 import { supabase } from "@/lib/supabase";
+import { PotentialDuplicate } from "@/lib/utils/duplicate-detection";
 
-export interface PotentialDuplicate {
-  id: string;
-  uid: string;
-  supplier: string;
-  docNumber: string;
-  expenseDate: string;
-  amountWithVat: number;
-  matchScore: number; // How many fields match (2-4)
-  matchedFields: string[];
-}
+// Re-export for convenience
+export type { PotentialDuplicate } from "@/lib/utils/duplicate-detection";
 
 // Check for potential duplicate expenses
 // A duplicate is detected when at least 2 of these fields match:
@@ -118,14 +111,4 @@ export async function checkForDuplicates(
   duplicates.sort((a, b) => b.matchScore - a.matchScore);
 
   return duplicates.slice(0, 5); // Return max 5 potential duplicates
-}
-
-// Format duplicate warning message
-export function formatDuplicateWarning(duplicates: PotentialDuplicate[]): string {
-  if (duplicates.length === 0) return "";
-
-  const dup = duplicates[0];
-  const fields = dup.matchedFields.join(", ");
-  
-  return `Atenție: Există o cheltuială similară (${dup.uid || dup.id.slice(0, 8)}) cu aceleași: ${fields}. Sigur doriți să continuați?`;
 }

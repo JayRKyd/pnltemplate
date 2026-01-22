@@ -11,7 +11,8 @@ import { getCategoryTree, CategoryWithChildren } from "@/app/actions/categories"
 import { searchSuppliers, SupplierSearchResult } from "@/app/actions/suppliers";
 import { getTagSuggestions, TagSuggestion } from "@/app/actions/tags";
 import { validateTags } from "@/lib/utils/tags";
-import { checkForDuplicates, PotentialDuplicate, formatDuplicateWarning } from "@/app/actions/duplicate-detection";
+import { checkForDuplicates } from "@/app/actions/duplicate-detection";
+import { PotentialDuplicate, formatDuplicateWarning } from "@/lib/utils/duplicate-detection";
 
 // Updated doc types as per spec
 const DOC_TYPES = ["Bon", "Factura", "eFactura", "Chitanta", "Altceva"];
