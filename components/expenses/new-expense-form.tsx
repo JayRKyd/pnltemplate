@@ -355,39 +355,6 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     setValidationError("");
   }, [validateDate]);
 
-  // Check for duplicates (debounced)
-  const duplicateCheckTimeout = useRef<NodeJS.Timeout | null>(null);
-  
-  const checkDuplicates = useCallback(async () => {
-    if (duplicateCheckTimeout.current) {
-      clearTimeout(duplicateCheckTimeout.current);
-    }
-    
-    duplicateCheckTimeout.current = setTimeout(async () => {
-      setDuplicateCheckPending(true);
-      try {
-        const duplicates = await checkForDuplicates(teamId, {
-          docNumber: nrDoc || undefined,
-          supplier: furnizor || undefined,
-          expenseDate: selectedDate.toISOString().split("T")[0],
-          amountWithVat: lines[0]?.sumaCuTVA ? parseAmount(lines[0].sumaCuTVA) : undefined,
-        });
-        setPotentialDuplicates(duplicates);
-      } catch (error) {
-        console.error("Duplicate check error:", error);
-      } finally {
-        setDuplicateCheckPending(false);
-      }
-    }, 500);
-  }, [teamId, nrDoc, furnizor, selectedDate, lines]);
-
-  // Run duplicate check when relevant fields change
-  useEffect(() => {
-    if (nrDoc || furnizor || lines[0]?.sumaCuTVA) {
-      checkDuplicates();
-    }
-  }, [nrDoc, furnizor, selectedDate, lines, checkDuplicates]);
-
   // Close supplier dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -432,6 +399,39 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
       calculatedField: null,
     },
   ]);
+
+  // Check for duplicates (debounced) - must be after lines declaration
+  const duplicateCheckTimeout = useRef<NodeJS.Timeout | null>(null);
+  
+  const checkDuplicates = useCallback(async () => {
+    if (duplicateCheckTimeout.current) {
+      clearTimeout(duplicateCheckTimeout.current);
+    }
+    
+    duplicateCheckTimeout.current = setTimeout(async () => {
+      setDuplicateCheckPending(true);
+      try {
+        const duplicates = await checkForDuplicates(teamId, {
+          docNumber: nrDoc || undefined,
+          supplier: furnizor || undefined,
+          expenseDate: selectedDate.toISOString().split("T")[0],
+          amountWithVat: lines[0]?.sumaCuTVA ? parseAmount(lines[0].sumaCuTVA) : undefined,
+        });
+        setPotentialDuplicates(duplicates);
+      } catch (error) {
+        console.error("Duplicate check error:", error);
+      } finally {
+        setDuplicateCheckPending(false);
+      }
+    }, 500);
+  }, [teamId, nrDoc, furnizor, selectedDate, lines]);
+
+  // Run duplicate check when relevant fields change
+  useEffect(() => {
+    if (nrDoc || furnizor || lines[0]?.sumaCuTVA) {
+      checkDuplicates();
+    }
+  }, [nrDoc, furnizor, selectedDate, lines, checkDuplicates]);
 
   const handleBack = () => {
     if (onBack) {
