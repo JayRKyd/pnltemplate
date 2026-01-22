@@ -50,15 +50,64 @@ interface Props {
   onBack?: () => void;
 }
 
-// Format number with Romanian locale (comma as decimal separator)
-function formatAmount(value: string): string {
-  const num = parseFloat(value.replace(",", ".")) || 0;
+// Format number with Romanian locale (comma as decimal separator, dot as thousand separator)
+function formatAmount(value: string | number): string {
+  // Handle number input directly
+  if (typeof value === "number") {
+    return value.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  
+  // Parse the string value first
+  const num = parseAmount(value);
+  if (num === 0 && value.trim() === "") return "";
   return num.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Parse Romanian formatted number back to standard
+// Parse Romanian formatted number (or plain number) back to standard number
 function parseAmount(value: string): number {
-  return parseFloat(value.replace(/\./g, "").replace(",", ".")) || 0;
+  if (!value || value.trim() === "") return 0;
+  
+  // Remove any spaces
+  let cleaned = value.replace(/\s/g, "");
+  
+  // Check if it looks like Romanian format (has dots for thousands and/or comma for decimal)
+  // Romanian: 1.234,56 -> 1234.56
+  // English: 1,234.56 -> 1234.56
+  // Plain: 1234.56 or 1234,56
+  
+  const hasRomanianFormat = cleaned.includes(",") && (cleaned.indexOf(",") > cleaned.lastIndexOf(".") || !cleaned.includes("."));
+  
+  if (hasRomanianFormat) {
+    // Romanian format: remove thousand separators (dots), replace decimal comma with dot
+    cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+  } else if (cleaned.includes(",") && cleaned.includes(".")) {
+    // English format: remove thousand separators (commas)
+    cleaned = cleaned.replace(/,/g, "");
+  } else if (cleaned.includes(",") && !cleaned.includes(".")) {
+    // Could be either 1,234 (English thousand) or 1,23 (Romanian decimal)
+    // Check position - if comma has 3 digits after, it's likely thousand separator
+    const commaPos = cleaned.indexOf(",");
+    const afterComma = cleaned.substring(commaPos + 1);
+    if (afterComma.length === 3 && /^\d+$/.test(afterComma)) {
+      // Likely thousand separator
+      cleaned = cleaned.replace(",", "");
+    } else {
+      // Likely decimal separator
+      cleaned = cleaned.replace(",", ".");
+    }
+  }
+  
+  return parseFloat(cleaned) || 0;
+}
+
+// Format number for display while typing (less aggressive formatting)
+function formatAmountForInput(value: string): string {
+  // Allow user to type freely - only clean up obviously wrong patterns
+  if (!value) return "";
+  
+  // Allow digits, one comma OR one dot for decimals, and dots for thousands
+  // Just return cleaned value without full formatting (user is still typing)
+  return value;
 }
 
 // Smart VAT auto-calculation: when 2 of 3 fields are entered, calculate the 3rd
@@ -509,6 +558,39 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
       return newLines;
     });
   }, []);
+
+  // Format amount on blur (when user leaves the field)
+  const handleAmountBlur = useCallback((index: number, field: "sumaCuTVA" | "sumaFaraTVA" | "tva") => {
+    setLines(prevLines => {
+      const newLines = [...prevLines];
+      const line = { ...newLines[index] };
+      const currentValue = line[field];
+      
+      // Only format if there's a value and it's not the calculated field
+      if (currentValue && currentValue.trim() !== "" && line.calculatedField !== field) {
+        const numValue = parseAmount(currentValue);
+        if (numValue > 0) {
+          line[field] = formatAmount(numValue);
+        } else if (currentValue.trim() !== "") {
+          // User entered 0 or invalid - clear it
+          line[field] = "";
+          line.manualFields = line.manualFields.filter(f => f !== field);
+        }
+      }
+      
+      newLines[index] = line;
+      return newLines;
+    });
+  }, []);
+
+  // Clear placeholder on focus (per spec: "placeholder is deleted and you start writing in an empty field")
+  const handleAmountFocus = useCallback((e: React.FocusEvent<HTMLInputElement>, index: number, field: "sumaCuTVA" | "sumaFaraTVA" | "tva") => {
+    const value = e.target.value;
+    // If it shows "0,00" or similar placeholder-like value, clear it
+    if (value === "0,00" || value === "0.00" || value === "0") {
+      updateLine(index, field, "");
+    }
+  }, [updateLine]);
 
   const addLine = () => {
     // Enforce max 5 line items
@@ -1001,9 +1083,11 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
             <div className="flex items-center justify-between">
               <input
                 type="text"
+                inputMode="decimal"
                 value={lines[0]?.sumaCuTVA || ''}
                 onChange={(e) => updateLine(0, "sumaCuTVA", e.target.value)}
-                onFocus={(e) => e.target.value === "0,00" && updateLine(0, "sumaCuTVA", "")}
+                onFocus={(e) => handleAmountFocus(e, 0, "sumaCuTVA")}
+                onBlur={() => handleAmountBlur(0, "sumaCuTVA")}
                 placeholder="0,00"
                 readOnly={lines[0]?.calculatedField === "sumaCuTVA"}
                 className={`flex-1 bg-transparent font-medium text-sm focus:outline-none ${lines[0]?.calculatedField === "sumaCuTVA" ? "text-gray-500" : "text-gray-900"}`}
@@ -1024,9 +1108,11 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
             <div className="flex items-center justify-between">
               <input
                 type="text"
+                inputMode="decimal"
                 value={lines[0]?.sumaFaraTVA || ''}
                 onChange={(e) => updateLine(0, "sumaFaraTVA", e.target.value)}
-                onFocus={(e) => e.target.value === "0,00" && updateLine(0, "sumaFaraTVA", "")}
+                onFocus={(e) => handleAmountFocus(e, 0, "sumaFaraTVA")}
+                onBlur={() => handleAmountBlur(0, "sumaFaraTVA")}
                 placeholder="0,00"
                 readOnly={lines[0]?.calculatedField === "sumaFaraTVA"}
                 className={`flex-1 bg-transparent font-medium text-sm focus:outline-none ${lines[0]?.calculatedField === "sumaFaraTVA" ? "text-gray-500" : "text-gray-900"}`}
@@ -1047,9 +1133,11 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
             <div className="flex items-center justify-between">
               <input
                 type="text"
+                inputMode="decimal"
                 value={lines[0]?.tva || ''}
                 onChange={(e) => updateLine(0, "tva", e.target.value)}
-                onFocus={(e) => e.target.value === "0,00" && updateLine(0, "tva", "")}
+                onFocus={(e) => handleAmountFocus(e, 0, "tva")}
+                onBlur={() => handleAmountBlur(0, "tva")}
                 placeholder="0,00"
                 readOnly={lines[0]?.calculatedField === "tva"}
                 className={`flex-1 bg-transparent text-sm focus:outline-none ${lines[0]?.calculatedField === "tva" ? "text-gray-400" : "text-gray-500"}`}
@@ -1652,9 +1740,11 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
                     <div className={`flex-1 flex items-center justify-between px-4 py-2 rounded-xl ${line.calculatedField === "sumaCuTVA" ? "bg-gray-100" : "bg-white"}`}>
                       <input
                         type="text"
+                        inputMode="decimal"
                         value={line.sumaCuTVA}
                         onChange={(e) => updateLine(index, "sumaCuTVA", e.target.value)}
-                        onFocus={(e) => e.target.value === "0,00" && updateLine(index, "sumaCuTVA", "")}
+                        onFocus={(e) => handleAmountFocus(e, index, "sumaCuTVA")}
+                        onBlur={() => handleAmountBlur(index, "sumaCuTVA")}
                         placeholder="0,00"
                         readOnly={line.calculatedField === "sumaCuTVA"}
                         className={`w-full bg-transparent border-none focus:outline-none font-medium ${line.calculatedField === "sumaCuTVA" ? "text-gray-500" : "text-gray-900"}`}
@@ -1684,9 +1774,11 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
                     <div className={`flex-1 flex items-center justify-between px-4 py-2 rounded-xl ${line.calculatedField === "sumaFaraTVA" ? "bg-gray-100" : "bg-white"}`}>
                       <input
                         type="text"
+                        inputMode="decimal"
                         value={line.sumaFaraTVA}
                         onChange={(e) => updateLine(index, "sumaFaraTVA", e.target.value)}
-                        onFocus={(e) => e.target.value === "0,00" && updateLine(index, "sumaFaraTVA", "")}
+                        onFocus={(e) => handleAmountFocus(e, index, "sumaFaraTVA")}
+                        onBlur={() => handleAmountBlur(index, "sumaFaraTVA")}
                         placeholder="0,00"
                         readOnly={line.calculatedField === "sumaFaraTVA"}
                         className={`w-full bg-transparent border-none focus:outline-none font-medium ${line.calculatedField === "sumaFaraTVA" ? "text-gray-500" : "text-gray-900"}`}
@@ -1716,9 +1808,11 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
                     <div className={`flex-1 flex items-center justify-between px-4 py-2 rounded-xl ${line.calculatedField === "tva" ? "bg-gray-100" : "bg-white"}`}>
                       <input
                         type="text"
+                        inputMode="decimal"
                         value={line.tva}
                         onChange={(e) => updateLine(index, "tva", e.target.value)}
-                        onFocus={(e) => e.target.value === "0,00" && updateLine(index, "tva", "")}
+                        onFocus={(e) => handleAmountFocus(e, index, "tva")}
+                        onBlur={() => handleAmountBlur(index, "tva")}
                         placeholder="0,00"
                         readOnly={line.calculatedField === "tva"}
                         className={`w-full bg-transparent border-none focus:outline-none ${line.calculatedField === "tva" ? "text-gray-400" : "text-gray-500"}`}
