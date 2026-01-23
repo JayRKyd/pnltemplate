@@ -1,12 +1,11 @@
 "use client";
 
-import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { X, Upload, ChevronDown, Plus, Check, AlertTriangle, Loader2 } from "lucide-react";
 import { createExpense, createMultiLineExpense, submitForApproval, ExpenseInput, ExpenseLineInput } from "@/app/actions/expenses";
 import { uploadAttachment } from "@/app/actions/attachments";
 import { CalendarModal } from "@/components/ui/calendar-modal";
-import { MonthYearPicker } from "@/components/ui/month-year-picker";
 import { getCategoryTree, CategoryWithChildren } from "@/app/actions/categories";
 import { searchSuppliers, SupplierSearchResult } from "@/app/actions/suppliers";
 import { getTagSuggestions, TagSuggestion } from "@/app/actions/tags";
@@ -16,7 +15,7 @@ import { PotentialDuplicate, formatDuplicateWarning } from "@/lib/utils/duplicat
 
 // Updated doc types as per spec
 const DOC_TYPES = ["Bon", "Factura", "eFactura", "Chitanta", "Altceva"];
-const PAYMENT_STATUS = ["Platit", "Neplatit", "Partial"];
+const PAYMENT_STATUS = ["Platit", "Neplatit"];
 const TVA_DEDUCTIBIL_OPTIONS = ["Nu", "Da"];
 
 // Date validation constants
@@ -39,9 +38,7 @@ interface TransactionLine {
   subcategoryId: string;
   tvaDeductibil: string;
   tags: string;
-  // Track which fields were manually entered (for smart auto-calc)
   manualFields: ("sumaCuTVA" | "sumaFaraTVA" | "tva")[];
-  // Track which field is calculated (read-only)
   calculatedField: "sumaCuTVA" | "sumaFaraTVA" | "tva" | null;
 }
 
@@ -50,67 +47,38 @@ interface Props {
   onBack?: () => void;
 }
 
-// Format number with Romanian locale (comma as decimal separator, dot as thousand separator)
+// Format number with Romanian locale
 function formatAmount(value: string | number): string {
-  // Handle number input directly
   if (typeof value === "number") {
     return value.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
-  
-  // Parse the string value first
   const num = parseAmount(value);
   if (num === 0 && value.trim() === "") return "";
   return num.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Parse Romanian formatted number (or plain number) back to standard number
+// Parse Romanian formatted number back to standard number
 function parseAmount(value: string): number {
   if (!value || value.trim() === "") return 0;
-  
-  // Remove any spaces
   let cleaned = value.replace(/\s/g, "");
-  
-  // Check if it looks like Romanian format (has dots for thousands and/or comma for decimal)
-  // Romanian: 1.234,56 -> 1234.56
-  // English: 1,234.56 -> 1234.56
-  // Plain: 1234.56 or 1234,56
-  
   const hasRomanianFormat = cleaned.includes(",") && (cleaned.indexOf(",") > cleaned.lastIndexOf(".") || !cleaned.includes("."));
-  
   if (hasRomanianFormat) {
-    // Romanian format: remove thousand separators (dots), replace decimal comma with dot
     cleaned = cleaned.replace(/\./g, "").replace(",", ".");
   } else if (cleaned.includes(",") && cleaned.includes(".")) {
-    // English format: remove thousand separators (commas)
     cleaned = cleaned.replace(/,/g, "");
   } else if (cleaned.includes(",") && !cleaned.includes(".")) {
-    // Could be either 1,234 (English thousand) or 1,23 (Romanian decimal)
-    // Check position - if comma has 3 digits after, it's likely thousand separator
     const commaPos = cleaned.indexOf(",");
     const afterComma = cleaned.substring(commaPos + 1);
     if (afterComma.length === 3 && /^\d+$/.test(afterComma)) {
-      // Likely thousand separator
       cleaned = cleaned.replace(",", "");
     } else {
-      // Likely decimal separator
       cleaned = cleaned.replace(",", ".");
     }
   }
-  
   return parseFloat(cleaned) || 0;
 }
 
-// Format number for display while typing (less aggressive formatting)
-function formatAmountForInput(value: string): string {
-  // Allow user to type freely - only clean up obviously wrong patterns
-  if (!value) return "";
-  
-  // Allow digits, one comma OR one dot for decimals, and dots for thousands
-  // Just return cleaned value without full formatting (user is still typing)
-  return value;
-}
-
-// Smart VAT auto-calculation: when 2 of 3 fields are entered, calculate the 3rd
+// Smart VAT auto-calculation
 function calculateVATFromTwoFields(
   field1: "sumaCuTVA" | "sumaFaraTVA" | "tva",
   value1: number,
@@ -120,7 +88,6 @@ function calculateVATFromTwoFields(
   let sumaCuTVA = 0, sumaFaraTVA = 0, tva = 0;
   let calculatedField: "sumaCuTVA" | "sumaFaraTVA" | "tva";
 
-  // Assign known values
   if (field1 === "sumaCuTVA") sumaCuTVA = value1;
   else if (field1 === "sumaFaraTVA") sumaFaraTVA = value1;
   else tva = value1;
@@ -129,39 +96,19 @@ function calculateVATFromTwoFields(
   else if (field2 === "sumaFaraTVA") sumaFaraTVA = value2;
   else tva = value2;
 
-  // Calculate the missing field
   if (field1 !== "sumaCuTVA" && field2 !== "sumaCuTVA") {
-    // Calculate sumaCuTVA from sumaFaraTVA + tva
     sumaCuTVA = sumaFaraTVA + tva;
     calculatedField = "sumaCuTVA";
   } else if (field1 !== "sumaFaraTVA" && field2 !== "sumaFaraTVA") {
-    // Calculate sumaFaraTVA from sumaCuTVA - tva
     sumaFaraTVA = sumaCuTVA - tva;
     calculatedField = "sumaFaraTVA";
   } else {
-    // Calculate tva from sumaCuTVA - sumaFaraTVA
     tva = sumaCuTVA - sumaFaraTVA;
     calculatedField = "tva";
   }
 
-  // Calculate VAT rate
   const cotaTVA = sumaFaraTVA > 0 ? (tva / sumaFaraTVA) * 100 : 0;
-
   return { sumaCuTVA, sumaFaraTVA, tva, cotaTVA, calculatedField };
-}
-
-// Legacy function for backward compatibility
-function calculateVATValues(sumaCuTVA: string) {
-  const total = parseAmount(sumaCuTVA);
-  const sumaFaraTVA = total / 1.19;
-  const tva = total - sumaFaraTVA;
-  const cotaTVA = total > 0 ? ((tva / sumaFaraTVA) * 100) : 0;
-  
-  return {
-    sumaFaraTVA: formatAmount(sumaFaraTVA.toFixed(2)),
-    tva: formatAmount(tva.toFixed(2)),
-    cotaTVA: cotaTVA.toFixed(2) + "%",
-  };
 }
 
 // Convert "noiembrie 2025" to "2025-11" for accountingPeriod
@@ -178,9 +125,36 @@ function convertToAccountingPeriod(lunaP: string): string {
   return month && year ? `${year}-${month}` : "";
 }
 
+// Reusable Text Input Component matching Figma
+const TextInput = ({
+  style,
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & { style?: React.CSSProperties }) => (
+  <input
+    {...props}
+    style={{
+      width: '296px',
+      height: '36px',
+      backgroundColor: 'rgba(255, 255, 255, 0.7)',
+      borderColor: 'rgba(209, 213, 220, 0.5)',
+      borderStyle: 'solid',
+      borderWidth: '1px',
+      boxSizing: 'border-box',
+      boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)',
+      borderRadius: '9999px',
+      padding: '0 16px',
+      fontSize: '14px',
+      fontFamily: '"Inter", sans-serif',
+      outline: 'none',
+      ...style
+    }}
+  />
+);
+
 export function NewExpenseForm({ teamId, onBack }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Header fields
   const [furnizor, setFurnizor] = useState("");
@@ -189,9 +163,9 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
   const [docType, setDocType] = useState("Factura");
   const [nrDoc, setNrDoc] = useState("");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [plata, setPlata] = useState("Neplatit"); // Default per spec: Neplătit
+  const [plata, setPlata] = useState("Neplatit");
   
-  // Document upload - support multiple files
+  // Document upload
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; preview: string; type: string; size: number }[]>([]);
   const [activePreviewIndex, setActivePreviewIndex] = useState(0);
   
@@ -199,229 +173,53 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
   const [showDocTypeDropdown, setShowDocTypeDropdown] = useState(false);
   const [showPlataDropdown, setShowPlataDropdown] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-
-  // Supplier search state
-  const [supplierSearchResults, setSupplierSearchResults] = useState<SupplierSearchResult[]>([]);
+  
+  // Supplier search
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
+  const [supplierSearchResults, setSupplierSearchResults] = useState<SupplierSearchResult[]>([]);
   const [searchingSupplier, setSearchingSupplier] = useState(false);
   const [supplierSearchError, setSupplierSearchError] = useState(false);
-  const [lastSupplierQuery, setLastSupplierQuery] = useState("");
   const supplierSearchTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // Tags autocomplete state
+  // Tags autocomplete
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [tagSuggestions, setTagSuggestions] = useState<TagSuggestion[]>([]);
-  const [showTagSuggestions, setShowTagSuggestions] = useState<number | null>(null);
   const [searchingTags, setSearchingTags] = useState(false);
-  const tagSearchTimeout = useRef<NodeJS.Timeout | null>(null);
 
   // Duplicate detection
   const [potentialDuplicates, setPotentialDuplicates] = useState<PotentialDuplicate[]>([]);
-  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
   const [duplicateCheckPending, setDuplicateCheckPending] = useState(false);
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
 
-  // Draft confirmation modal
+  // Validation
+  const [validationError, setValidationError] = useState("");
   const [showDraftConfirmModal, setShowDraftConfirmModal] = useState(false);
   const [missingFields, setMissingFields] = useState<string[]>([]);
+  const [showValidationErrors, setShowValidationErrors] = useState(false);
 
-  // Success modal and validation
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [validationError, setValidationError] = useState("");
+  // Server error handling
   const [showServerErrorModal, setShowServerErrorModal] = useState(false);
   const [lastSaveAttempt, setLastSaveAttempt] = useState<{ forceDraft: boolean } | null>(null);
 
-  // Categories from database
+  // Success modal
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+
+  // Categories
   const [categories, setCategories] = useState<CategoryWithChildren[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
 
-  // Fetch categories on mount
-  useEffect(() => {
-    async function loadCategories() {
-      const cats = await getCategoryTree(teamId);
-      setCategories(cats);
-    }
-    loadCategories();
-  }, [teamId]);
+  // Hover states
+  const [isHoveredBack, setIsHoveredBack] = useState(false);
 
-  // Update Luna P&L when date changes
-  useEffect(() => {
-    const months = ["ianuarie", "februarie", "martie", "aprilie", "mai", "iunie", 
-                    "iulie", "august", "septembrie", "octombrie", "noiembrie", "decembrie"];
-    const newMonthYear = `${months[selectedDate.getMonth()]} ${selectedDate.getFullYear()}`;
-    
-    setLines(prevLines => prevLines.map(line => ({
-      ...line,
-      lunaP: line.lunaP || newMonthYear, // Only set if not already set
-    })));
-  }, [selectedDate]);
+  // Month picker state - tracks which line index has its picker open (-1 = none)
+  const [openMonthPickerIndex, setOpenMonthPickerIndex] = useState<number>(-1);
+  const [monthPickerYear, setMonthPickerYear] = useState<number>(new Date().getFullYear());
 
-  // Supplier search handler
-  const handleSupplierSearch = useCallback(async (query: string) => {
-    if (furnizorLocked) return;
-    
-    setFurnizor(query);
-    setLastSupplierQuery(query);
-    setSupplierSearchError(false);
-    
-    // Clear previous timeout
-    if (supplierSearchTimeout.current) {
-      clearTimeout(supplierSearchTimeout.current);
-    }
-
-    // Hide dropdown if query is too short
-    if (query.length < 3) {
-      setShowSupplierDropdown(false);
-      setSupplierSearchResults([]);
-      return;
-    }
-
-    // Debounce search
-    supplierSearchTimeout.current = setTimeout(async () => {
-      setSearchingSupplier(true);
-      try {
-        const results = await searchSuppliers(query, teamId);
-        setSupplierSearchResults(results);
-        setShowSupplierDropdown(true);
-        setSupplierSearchError(false);
-      } catch (error) {
-        console.error("Supplier search error:", error);
-        setSupplierSearchError(true);
-        setShowSupplierDropdown(true);
-      } finally {
-        setSearchingSupplier(false);
-      }
-    }, 300);
-  }, [teamId, furnizorLocked]);
-
-  // Retry supplier search
-  const retrySupplierSearch = useCallback(() => {
-    if (lastSupplierQuery) {
-      handleSupplierSearch(lastSupplierQuery);
-    }
-  }, [lastSupplierQuery, handleSupplierSearch]);
-
-  // Select supplier from dropdown
-  const handleSupplierSelect = useCallback((supplier: SupplierSearchResult) => {
-    setFurnizor(supplier.name);
-    setFurnizorCui(supplier.cui);
-    setFurnizorLocked(true);
-    setShowSupplierDropdown(false);
-  }, []);
-
-  // Unlock supplier field to allow re-search
-  const handleSupplierUnlock = useCallback(() => {
-    setFurnizorLocked(false);
-    setFurnizor("");
-    setFurnizorCui("");
-  }, []);
-
-  // Tags search handler
-  const handleTagsSearch = useCallback(async (query: string, lineIndex: number) => {
-    // Clear previous timeout
-    if (tagSearchTimeout.current) {
-      clearTimeout(tagSearchTimeout.current);
-    }
-
-    // Get the last tag being typed
-    const tags = query.split(/[,\s]+/);
-    const currentTag = tags[tags.length - 1];
-
-    if (currentTag.length < 1) {
-      setShowTagSuggestions(null);
-      setTagSuggestions([]);
-      return;
-    }
-
-    // Debounce search
-    tagSearchTimeout.current = setTimeout(async () => {
-      setSearchingTags(true);
-      try {
-        const results = await getTagSuggestions(currentTag, teamId);
-        setTagSuggestions(results);
-        setShowTagSuggestions(results.length > 0 ? lineIndex : null);
-      } catch (error) {
-        console.error("Tags search error:", error);
-      } finally {
-        setSearchingTags(false);
-      }
-    }, 200);
-  }, [teamId]);
-
-  // Select tag from suggestions
-  const handleTagSelect = useCallback((tag: string, lineIndex: number) => {
-    setLines(prevLines => {
-      const newLines = [...prevLines];
-      const currentTags = newLines[lineIndex].tags;
-      const tagParts = currentTags.split(/[,\s]+/).filter(t => t.length > 0);
-      tagParts.pop(); // Remove the partial tag being typed
-      tagParts.push(tag);
-      newLines[lineIndex].tags = tagParts.join(", ");
-      return newLines;
-    });
-    setShowTagSuggestions(null);
-  }, []);
-
-  // Reset all amount fields in a line
-  const resetAmountFields = useCallback((lineIndex: number) => {
-    setLines(prevLines => {
-      const newLines = [...prevLines];
-      newLines[lineIndex] = {
-        ...newLines[lineIndex],
-        sumaCuTVA: "",
-        sumaFaraTVA: "",
-        tva: "",
-        cotaTVA: "",
-        manualFields: [],
-        calculatedField: null,
-      };
-      return newLines;
-    });
-  }, []);
-
-  // Validate date: must be after Jan 1 2026 and not in the future
-  const validateDate = useCallback((date: Date): { valid: boolean; error?: string } => {
-    const today = new Date();
-    today.setHours(23, 59, 59, 999); // End of today
-    
-    if (date > today) {
-      return { valid: false, error: "Data nu poate fi in viitor" };
-    }
-    
-    if (date < MIN_DATE) {
-      return { valid: false, error: "Data trebuie sa fie dupa 1 ianuarie 2026" };
-    }
-    
-    return { valid: true };
-  }, []);
-
-  // Handle date selection with validation
-  const handleDateSelect = useCallback((date: Date) => {
-    const validation = validateDate(date);
-    if (!validation.valid) {
-      setValidationError(validation.error || "Data invalida");
-      return;
-    }
-    setSelectedDate(date);
-    setShowDatePicker(false);
-    setValidationError("");
-  }, [validateDate]);
-
-  // Close supplier dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest("[data-supplier-dropdown]")) {
-        setShowSupplierDropdown(false);
-      }
-    };
-
-    document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
-  }, []);
-
-  // Helper to get subcategories for a selected parent category
-  const getSubcategoriesForCategory = (categoryId: string): CategoryWithChildren[] => {
-    const parent = categories.find(c => c.id === categoryId);
-    return parent?.children || [];
-  };
+  // Romanian month names
+  const MONTHS_RO = ["Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie", 
+                     "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie"];
+  const MONTHS_RO_LOWER = ["ianuarie", "februarie", "martie", "aprilie", "mai", "iunie", 
+                           "iulie", "august", "septembrie", "octombrie", "noiembrie", "decembrie"];
 
   // Helper to get current month/year in Romanian format
   const getCurrentMonthYear = useCallback(() => {
@@ -442,46 +240,29 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
       lunaP: getCurrentMonthYear(),
       categoryId: "",
       subcategoryId: "",
-      tvaDeductibil: "Da", // Default per spec: Yes
+      tvaDeductibil: "Da",
       tags: "",
       manualFields: [],
       calculatedField: null,
     },
   ]);
 
-  // Check for duplicates (debounced) - must be after lines declaration
-  const duplicateCheckTimeout = useRef<NodeJS.Timeout | null>(null);
-  
-  const checkDuplicates = useCallback(async () => {
-    if (duplicateCheckTimeout.current) {
-      clearTimeout(duplicateCheckTimeout.current);
-    }
-    
-    duplicateCheckTimeout.current = setTimeout(async () => {
-      setDuplicateCheckPending(true);
-      try {
-        const duplicates = await checkForDuplicates(teamId, {
-          docNumber: nrDoc || undefined,
-          supplier: furnizor || undefined,
-          expenseDate: selectedDate.toISOString().split("T")[0],
-          amountWithVat: lines[0]?.sumaCuTVA ? parseAmount(lines[0].sumaCuTVA) : undefined,
-        });
-        setPotentialDuplicates(duplicates);
-      } catch (error) {
-        console.error("Duplicate check error:", error);
-      } finally {
-        setDuplicateCheckPending(false);
-      }
-    }, 500);
-  }, [teamId, nrDoc, furnizor, selectedDate, lines]);
-
-  // Run duplicate check when relevant fields change
+  // Load categories on mount
   useEffect(() => {
-    if (nrDoc || furnizor || lines[0]?.sumaCuTVA) {
-      checkDuplicates();
+    async function loadCategories() {
+      try {
+        const tree = await getCategoryTree(teamId);
+        setCategories(tree);
+      } catch (err) {
+        console.error("Failed to load categories:", err);
+      } finally {
+        setLoadingCategories(false);
+      }
     }
-  }, [nrDoc, furnizor, selectedDate, lines, checkDuplicates]);
+    loadCategories();
+  }, [teamId]);
 
+  // Handle back navigation
   const handleBack = () => {
     if (onBack) {
       onBack();
@@ -490,6 +271,7 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     }
   };
 
+  // Format date for display
   const formatDateDisplay = (date: Date) => {
     const day = date.getDate().toString().padStart(2, "0");
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -498,27 +280,135 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     return `${day}-${month}-${year}`;
   };
 
+  // Date validation
+  const validateDate = useCallback((date: Date) => {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    if (date > today) {
+      return { valid: false, error: "Data nu poate fi in viitor" };
+    }
+    if (date < MIN_DATE) {
+      return { valid: false, error: "Data trebuie sa fie dupa 1 ianuarie 2026" };
+    }
+    return { valid: true };
+  }, []);
+
+  const handleDateSelect = useCallback((date: Date) => {
+    const validation = validateDate(date);
+    if (!validation.valid) {
+      setValidationError(validation.error || "Data invalida");
+      return;
+    }
+    setSelectedDate(date);
+    setShowDatePicker(false);
+    setValidationError("");
+  }, [validateDate]);
+
+  // Supplier search handlers
+  const handleSupplierSearch = useCallback(async (query: string) => {
+    setFurnizor(query);
+    setFurnizorLocked(false);
+    setFurnizorCui("");
+    setSupplierSearchError(false);
+
+    if (supplierSearchTimeout.current) {
+      clearTimeout(supplierSearchTimeout.current);
+    }
+
+    if (query.length < 3) {
+      setShowSupplierDropdown(false);
+      setSupplierSearchResults([]);
+      return;
+    }
+
+    setSearchingSupplier(true);
+    setShowSupplierDropdown(true);
+
+    supplierSearchTimeout.current = setTimeout(async () => {
+      try {
+        const results = await searchSuppliers(query, teamId);
+        setSupplierSearchResults(results);
+        setSupplierSearchError(false);
+      } catch (err) {
+        console.error("Supplier search error:", err);
+        setSupplierSearchError(true);
+        setSupplierSearchResults([]);
+      } finally {
+        setSearchingSupplier(false);
+      }
+    }, 300);
+  }, [teamId]);
+
+  const handleSupplierSelect = useCallback((supplier: SupplierSearchResult) => {
+    setFurnizor(supplier.name);
+    setFurnizorCui(supplier.cui || "");
+    setFurnizorLocked(true);
+    setShowSupplierDropdown(false);
+    setSupplierSearchResults([]);
+  }, []);
+
+  const handleSupplierUnlock = useCallback(() => {
+    setFurnizorLocked(false);
+    setFurnizorCui("");
+  }, []);
+
+  const retrySupplierSearch = useCallback(() => {
+    handleSupplierSearch(furnizor);
+  }, [furnizor, handleSupplierSearch]);
+
+  // File upload handler
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    Array.from(files).forEach(file => {
+      if (file.size > MAX_FILE_SIZE) {
+        setValidationError(`Fisierul ${file.name} depaseste 10MB`);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const preview = ev.target?.result as string;
+        setUploadedFiles(prev => [...prev, {
+          name: file.name,
+          preview,
+          type: file.type,
+          size: file.size
+        }]);
+        setActivePreviewIndex(prev => uploadedFiles.length);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    e.target.value = "";
+  }, [uploadedFiles.length]);
+
+  const removeUploadedFile = useCallback((index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+    if (activePreviewIndex >= index && activePreviewIndex > 0) {
+      setActivePreviewIndex(prev => prev - 1);
+    }
+  }, [activePreviewIndex]);
+
+  // Update line fields
   const updateLine = useCallback((index: number, field: keyof TransactionLine, value: string) => {
     setLines(prevLines => {
       const newLines = [...prevLines];
       const line = { ...newLines[index] };
       
-      // Type-safe assignment for amount fields
       if (field === "sumaCuTVA" || field === "sumaFaraTVA" || field === "tva") {
         line[field] = value;
         
-        // Track manually entered fields
         const amountField = field as "sumaCuTVA" | "sumaFaraTVA" | "tva";
         if (!line.manualFields.includes(amountField) && value.trim() !== "") {
           line.manualFields = [...line.manualFields, amountField];
         }
         
-        // Remove from manual if cleared
         if (value.trim() === "" || value === "0" || value === "0,00") {
           line.manualFields = line.manualFields.filter(f => f !== amountField);
         }
         
-        // Smart auto-calculation: when exactly 2 fields are filled, calculate the 3rd
         const filledFields = line.manualFields.filter(f => {
           const val = line[f];
           return val && val.trim() !== "" && val !== "0" && val !== "0,00";
@@ -532,7 +422,6 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
           if (value1 > 0 || value2 > 0) {
             const result = calculateVATFromTwoFields(field1, value1, field2, value2);
             
-            // Update the calculated field
             if (result.calculatedField === "sumaCuTVA") {
               line.sumaCuTVA = formatAmount(result.sumaCuTVA.toFixed(2));
             } else if (result.calculatedField === "sumaFaraTVA") {
@@ -545,12 +434,10 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
             line.cotaTVA = result.cotaTVA.toFixed(2) + "%";
           }
         } else if (filledFields.length < 2) {
-          // Not enough fields to calculate
           line.calculatedField = null;
           line.cotaTVA = "";
         }
       } else {
-        // Non-amount field update
         (line as Record<string, unknown>)[field] = value;
       }
       
@@ -559,20 +446,18 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     });
   }, []);
 
-  // Format amount on blur (when user leaves the field)
+  // Format amount on blur
   const handleAmountBlur = useCallback((index: number, field: "sumaCuTVA" | "sumaFaraTVA" | "tva") => {
     setLines(prevLines => {
       const newLines = [...prevLines];
       const line = { ...newLines[index] };
       const currentValue = line[field];
       
-      // Only format if there's a value and it's not the calculated field
       if (currentValue && currentValue.trim() !== "" && line.calculatedField !== field) {
         const numValue = parseAmount(currentValue);
         if (numValue > 0) {
           line[field] = formatAmount(numValue);
         } else if (currentValue.trim() !== "") {
-          // User entered 0 or invalid - clear it
           line[field] = "";
           line.manualFields = line.manualFields.filter(f => f !== field);
         }
@@ -583,23 +468,31 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     });
   }, []);
 
-  // Clear placeholder on focus (per spec: "placeholder is deleted and you start writing in an empty field")
-  const handleAmountFocus = useCallback((e: React.FocusEvent<HTMLInputElement>, index: number, field: "sumaCuTVA" | "sumaFaraTVA" | "tva") => {
-    const value = e.target.value;
-    // If it shows "0,00" or similar placeholder-like value, clear it
-    if (value === "0,00" || value === "0.00" || value === "0") {
-      updateLine(index, field, "");
-    }
-  }, [updateLine]);
+  // Reset amount fields
+  const resetAmountFields = useCallback((index: number) => {
+    setLines(prevLines => {
+      const newLines = [...prevLines];
+      newLines[index] = {
+        ...newLines[index],
+        sumaCuTVA: "",
+        sumaFaraTVA: "",
+        tva: "",
+        cotaTVA: "",
+        manualFields: [],
+        calculatedField: null,
+      };
+      return newLines;
+    });
+  }, []);
 
+  // Add new line
   const addLine = () => {
-    // Enforce max 5 line items
     if (lines.length >= MAX_LINE_ITEMS) {
       setValidationError(`Maximum ${MAX_LINE_ITEMS} produse per document`);
       return;
     }
     
-    const newLines = [
+    setLines([
       ...lines,
       {
         descriere: "",
@@ -615,78 +508,22 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
         manualFields: [],
         calculatedField: null,
       },
-    ];
-    setLines(newLines);
-    
-    // Scroll to new section
-    setTimeout(() => {
-      const lastCard = document.querySelector(`[data-line-index="${newLines.length - 1}"]`);
-      lastCard?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 100);
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      const newFiles: { name: string; preview: string; type: string; size: number }[] = [];
-      let hasError = false;
-      
-      Array.from(files).forEach((file) => {
-        // Validate file size (max 10MB)
-        if (file.size > MAX_FILE_SIZE) {
-          setValidationError(`Fisierul "${file.name}" este prea mare. Dimensiune maxima: 10MB`);
-          hasError = true;
-          return;
-        }
-        
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          newFiles.push({
-            name: file.name,
-            preview: event.target?.result as string,
-            type: file.type,
-            size: file.size,
-          });
-          
-          // When all files are read, update state
-          if (newFiles.length === files.length) {
-            setUploadedFiles(prev => [...prev, ...newFiles]);
-            setActivePreviewIndex(uploadedFiles.length); // Show first new file
-            if (!hasError) setValidationError("");
-          }
-        };
-        reader.readAsDataURL(file);
-      });
-      
-      e.target.value = ""; // Reset input for future uploads
-    }
-  };
-
-  // Remove a specific uploaded file
-  const removeUploadedFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
-    if (activePreviewIndex >= uploadedFiles.length - 1) {
-      setActivePreviewIndex(Math.max(0, uploadedFiles.length - 2));
-    }
+    ]);
   };
 
   // Check for missing required fields
-  const checkMissingFields = useCallback((): string[] => {
+  const checkMissingFields = useCallback(() => {
     const missing: string[] = [];
     
     if (!furnizor.trim()) missing.push("Furnizor");
-    if (!docType) missing.push("Tip document");
+    if (!docType) missing.push("Tip Document");
     if (uploadedFiles.length === 0) missing.push("Document");
     
     lines.forEach((line, idx) => {
       const linePrefix = lines.length > 1 ? `Produs ${idx + 1}: ` : "";
       
-      // Description is required per spec
-      if (!line.descriere.trim()) {
-        missing.push(`${linePrefix}Descriere`);
-      }
+      if (!line.descriere.trim()) missing.push(`${linePrefix}Descriere`);
       
-      // Check that at least 2 amount fields are filled
       const filledAmounts = [line.sumaCuTVA, line.sumaFaraTVA, line.tva].filter(
         v => v && v.trim() !== "" && v !== "0" && v !== "0,00"
       ).length;
@@ -695,68 +532,89 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
       }
       
       if (!line.categoryId) missing.push(`${linePrefix}Cont`);
-      if (!line.subcategoryId) missing.push(`${linePrefix}Subcont`);
     });
     
     return missing;
   }, [furnizor, docType, uploadedFiles.length, lines]);
 
-  // Validate tags format
-  const validateAllTags = useCallback((): { valid: boolean; errors: string[] } => {
-    const allErrors: string[] = [];
+  // Helper to check if a field should show validation error
+  const hasFieldError = useCallback((lineIndex: number, field: string) => {
+    if (!showValidationErrors) return false;
+    const line = lines[lineIndex];
     
-    lines.forEach((line, idx) => {
-      if (line.tags.trim()) {
-        const validation = validateTags(line.tags);
-        if (!validation.valid) {
-          const linePrefix = lines.length > 1 ? `Produs ${idx + 1}: ` : "";
-          allErrors.push(...validation.errors.map(e => `${linePrefix}${e}`));
-        }
-      }
-    });
-    
-    return { valid: allErrors.length === 0, errors: allErrors };
-  }, [lines]);
+    switch (field) {
+      case 'descriere':
+        return !line.descriere.trim();
+      case 'sumaCuTVA':
+      case 'sumaFaraTVA':
+      case 'tva':
+        // Check if at least 2 amount fields are filled
+        const filledAmounts = [line.sumaCuTVA, line.sumaFaraTVA, line.tva].filter(
+          v => v && v.trim() !== "" && v !== "0" && v !== "0,00"
+        ).length;
+        return filledAmounts < 2;
+      case 'categoryId':
+        return !line.categoryId;
+      case 'subcategoryId':
+        // Subcont is only required if cont is selected and has subcategories
+        return false; // Optional field
+      case 'tags':
+        return false; // Optional field
+      default:
+        return false;
+    }
+  }, [showValidationErrors, lines]);
 
-  // Handle save with draft support
+  // Validation error styles
+  const errorBorderStyle = 'rgba(252, 165, 165, 1)';
+  const errorBgStyle = 'rgba(254, 242, 242, 0.5)';
+  const errorTextStyle = 'rgba(239, 68, 68, 1)';
+
+  // Helper to check header field validation errors
+  const hasHeaderFieldError = useCallback((field: string) => {
+    if (!showValidationErrors) return false;
+    
+    switch (field) {
+      case 'furnizor':
+        return !furnizor.trim();
+      case 'docType':
+        return !docType;
+      case 'document':
+        return uploadedFiles.length === 0;
+      default:
+        return false;
+    }
+  }, [showValidationErrors, furnizor, docType, uploadedFiles.length]);
+
+  // Handle save
   const handleSave = async (forceDraft = false) => {
-    setValidationError("");
-    
-    // Check for potential duplicates
-    if (potentialDuplicates.length > 0 && !showDuplicateWarning && !forceDraft) {
-      setShowDuplicateWarning(true);
-      return;
-    }
-    
-    // Validate tags format
-    const tagValidation = validateAllTags();
-    if (!tagValidation.valid) {
-      setValidationError(tagValidation.errors.join("; "));
-      return;
-    }
-    
-    // Check for missing fields
     const missing = checkMissingFields();
-    const isDraft = missing.length > 0;
     
-    // If there are missing fields and not forcing draft, show confirmation
-    if (isDraft && !forceDraft) {
+    // Show validation errors on fields
+    setShowValidationErrors(true);
+    
+    if (missing.length > 0 && !forceDraft) {
       setMissingFields(missing);
       setShowDraftConfirmModal(true);
       return;
     }
 
+    // Check for duplicates
+    if (potentialDuplicates.length > 0 && !showDuplicateWarning) {
+      setShowDuplicateWarning(true);
+      return;
+    }
+
+    const isDraft = forceDraft || missing.length > 0;
     setLoading(true);
     setShowDuplicateWarning(false);
     setShowDraftConfirmModal(false);
     
     try {
-      // Validate and normalize tags
       const normalizedTags = lines[0].tags.trim()
         ? validateTags(lines[0].tags).tags
         : undefined;
       
-      // Convert to API format and save
       const baseInput: ExpenseInput = {
         teamId,
         amount: parseAmount(lines[0].sumaCuTVA) || parseAmount(lines[0].sumaFaraTVA),
@@ -769,13 +627,13 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
         description: lines[0].descriere || undefined,
         docNumber: nrDoc || undefined,
         docType: docType.toLowerCase(),
-        paymentStatus: plata.toLowerCase() === "platit" ? "paid" : plata.toLowerCase() === "partial" ? "partial" : "unpaid",
+        paymentStatus: plata.toLowerCase() === "platit" ? "paid" : "unpaid",
         expenseDate: selectedDate.toISOString().split("T")[0],
         tags: normalizedTags,
         categoryId: lines[0].categoryId || undefined,
         subcategoryId: lines[0].subcategoryId || undefined,
         accountingPeriod: convertToAccountingPeriod(lines[0].lunaP) || undefined,
-        status: isDraft ? "draft" : "draft", // Always start as draft, then submit
+        status: isDraft ? "draft" : "draft",
       };
 
       let expenseId: string;
@@ -804,7 +662,7 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
 
       // Upload all attachments
       for (const file of uploadedFiles) {
-        const base64Data = file.preview.split(",")[1]; // Remove data:type;base64, prefix
+        const base64Data = file.preview.split(",")[1];
         await uploadAttachment(expenseId, teamId, {
           name: file.name,
           type: file.type,
@@ -813,12 +671,10 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
         });
       }
 
-      // Submit for approval only if not a draft
       if (!isDraft) {
         await submitForApproval(expenseId, teamId);
       }
 
-      // Show success modal
       setShowSuccessModal(true);
     } catch (err) {
       console.error("Failed to save expense:", err);
@@ -829,7 +685,6 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     }
   };
 
-  // Retry last save attempt
   const retrySave = useCallback(() => {
     setShowServerErrorModal(false);
     if (lastSaveAttempt) {
@@ -837,824 +692,235 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     }
   }, [lastSaveAttempt]);
 
-  // Custom Select Dropdown Component
-  const SelectDropdown = ({ 
-    value, 
-    options, 
-    isOpen, 
-    onToggle, 
-    onChange 
-  }: { 
-    value: string; 
-    options: string[]; 
-    isOpen: boolean; 
-    onToggle: () => void; 
-    onChange: (v: string) => void;
-  }) => (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex items-center gap-2 px-4 py-2.5 bg-white/80 backdrop-blur-xl border border-gray-200/60 rounded-full text-gray-700 hover:bg-white transition-all shadow-sm"
-        style={{ fontSize: "0.875rem", fontWeight: 400 }}
-      >
-        {value}
-        <ChevronDown size={16} className="text-gray-400" />
-      </button>
-      {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-40 bg-white rounded-xl shadow-lg border border-gray-200/60 py-1 z-50">
-          {options.map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => {
-                onChange(option);
-                onToggle();
-              }}
-              className={`w-full px-4 py-2 text-left hover:bg-gray-50 ${
-                value === option ? "bg-teal-50 text-teal-600" : "text-gray-700"
-              }`}
-              style={{ fontSize: "0.875rem" }}
-            >
-              {option}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  // Get subcategories for a selected parent category
+  const getSubcategoriesForCategory = (categoryId: string): CategoryWithChildren[] => {
+    const parent = categories.find(c => c.id === categoryId);
+    return parent?.children || [];
+  };
 
-  // Mobile Form Row Component
-  const MobileFormRow = ({ 
-    label, 
-    children, 
-    noBorder = false 
-  }: { 
-    label: string; 
-    children: React.ReactNode; 
-    noBorder?: boolean;
-  }) => (
-    <div className={`flex items-center py-4 ${noBorder ? '' : 'border-b border-gray-100'}`}>
-      <span className="text-gray-500 text-sm w-24 flex-shrink-0">{label}</span>
-      <div className="flex-1">{children}</div>
-    </div>
-  );
+  // Common button style
+  const buttonBaseStyle: React.CSSProperties = {
+    cursor: 'pointer',
+    border: 'none',
+    transition: 'all 0.2s ease'
+  };
 
   return (
-    <>
-      {/* ========== MOBILE VIEW ========== */}
-      <div className="md:hidden min-h-screen bg-white flex flex-col">
-        {/* Mobile Header */}
-        <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-4">
-            <button onClick={handleBack} className="p-1">
-              <X size={20} className="text-gray-600" />
-            </button>
-            <h1 className="text-base font-semibold text-gray-900">Decont nou</h1>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" />
-            <div className="w-2.5 h-2.5 rounded-full bg-[#EF4444]" />
-            <div className="w-2.5 h-2.5 rounded-full bg-[#3B82F6]" />
-          </div>
-        </div>
-
-        {/* Mobile Form Content */}
-        <div className="flex-1 overflow-y-auto px-4">
-          {/* Document Upload */}
-          <MobileFormRow label="Document">
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-gray-400 text-sm">
-                {uploadedFiles.length > 0 ? `${uploadedFiles.length} fisier${uploadedFiles.length > 1 ? 'e' : ''}` : 'Incarcă'}
-              </span>
-              <Upload size={18} className="text-gray-400" />
-              <input
-                type="file"
-                accept="image/*,application/pdf"
-                onChange={handleFileUpload}
-                multiple
-                className="hidden"
-              />
-            </label>
-          </MobileFormRow>
-
-          {/* Furnizor with Smart Search */}
-          <MobileFormRow label="Furnizor">
-            <div className="relative" data-supplier-dropdown>
-              <div className="flex items-center">
-                <input
-                  type="text"
-                  value={furnizorLocked ? `${furnizor}${furnizorCui ? ` / ${furnizorCui}` : ""}` : furnizor}
-                  onChange={(e) => handleSupplierSearch(e.target.value)}
-                  onFocus={() => furnizor.length >= 3 && !furnizorLocked && setShowSupplierDropdown(true)}
-                  placeholder="Furnizor (nume sau CUI)"
-                  disabled={furnizorLocked}
-                  className={`w-full bg-transparent text-gray-700 placeholder-gray-400 text-sm focus:outline-none ${furnizorLocked ? "text-gray-600" : ""}`}
-                />
-                {searchingSupplier && <Loader2 size={14} className="animate-spin text-gray-400 ml-2" />}
-                {furnizorLocked && (
-                  <button type="button" onClick={handleSupplierUnlock} className="text-gray-400 ml-2">
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-              
-              {/* Mobile Supplier Dropdown */}
-              {showSupplierDropdown && supplierSearchResults.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-lg border border-gray-200 py-1 z-50 max-h-48 overflow-y-auto">
-                  {supplierSearchResults.map((supplier, idx) => (
-                    <button
-                      key={supplier.cui || idx}
-                      type="button"
-                      onClick={() => handleSupplierSelect(supplier)}
-                      className="w-full px-3 py-2 text-left hover:bg-gray-50"
-                    >
-                      <span className="text-gray-800 text-sm font-medium block">{supplier.name}</span>
-                      {supplier.cui && <span className="text-gray-500 text-xs">CUI: {supplier.cui}</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-              
-              {/* Mobile No Results or Error */}
-              {showSupplierDropdown && supplierSearchResults.length === 0 && furnizor.length >= 3 && !searchingSupplier && (
-                <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-lg border border-gray-200 p-3 z-50">
-                  {supplierSearchError ? (
-                    <div className="flex items-center justify-between">
-                      <span className="text-red-500 text-sm">Eroare</span>
-                      <button type="button" onClick={retrySupplierSearch} className="text-teal-600 text-sm font-medium">
-                        Reincearca
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 text-sm">Nu s-au gasit rezultate</p>
-                  )}
-                </div>
-              )}
-            </div>
-          </MobileFormRow>
-
-          {/* Tip Doc */}
-          <MobileFormRow label="Tip Doc">
-            <div className="relative">
-              <select
-                value={docType}
-                onChange={(e) => setDocType(e.target.value)}
-                className="w-full bg-transparent text-gray-700 text-sm focus:outline-none appearance-none cursor-pointer pr-6"
-              >
-                <option value="">Selecteaza</option>
-                {DOC_TYPES.map((type) => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
-              <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            </div>
-          </MobileFormRow>
-
-          {/* Nr. Doc */}
-          <MobileFormRow label="Nr. Doc">
-            <input
-              type="text"
-              value={nrDoc}
-              onChange={(e) => setNrDoc(e.target.value)}
-              placeholder="Numar"
-              className="w-full bg-transparent text-gray-700 placeholder-gray-400 text-sm focus:outline-none"
-            />
-          </MobileFormRow>
-
-          {/* Data Doc with Validation */}
-          <MobileFormRow label="Data Doc">
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowDatePicker(true)}
-                className="w-full text-left text-gray-700 text-sm flex items-center justify-between"
-              >
-                <span>{selectedDate ? formatDateDisplay(selectedDate) : 'Selecteaza'}</span>
-                <ChevronDown size={16} className="text-gray-400" />
-              </button>
-              {showDatePicker && (
-                <CalendarModal
-                  selectedDate={selectedDate}
-                  onDateSelect={handleDateSelect}
-                  onClose={() => setShowDatePicker(false)}
-                  minDate={MIN_DATE}
-                  maxDate={new Date()}
-                />
-              )}
-            </div>
-          </MobileFormRow>
-
-          {/* Plata */}
-          <MobileFormRow label="Plata">
-            <div className="relative">
-              <select
-                value={plata}
-                onChange={(e) => setPlata(e.target.value)}
-                className="w-full bg-transparent text-gray-700 text-sm focus:outline-none appearance-none cursor-pointer pr-6"
-              >
-                {PAYMENT_STATUS.map((status) => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
-              <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            </div>
-          </MobileFormRow>
-
-          {/* Divider */}
-          <div className="h-px bg-gray-200 my-2" />
-
-          {/* Descriere */}
-          <MobileFormRow label="Descriere">
-            <textarea
-              value={lines[0]?.descriere || ''}
-              onChange={(e) => updateLine(0, "descriere", e.target.value)}
-              placeholder="Adauga descriere..."
-              rows={3}
-              className="w-full bg-transparent text-gray-700 placeholder-gray-400 text-sm focus:outline-none resize-none"
-            />
-          </MobileFormRow>
-
-          {/* Divider */}
-          <div className="h-px bg-gray-200 my-2" />
-
-          {/* Suma cu TVA */}
-          <MobileFormRow label="Suma cu TVA">
-            <div className="flex items-center justify-between">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={lines[0]?.sumaCuTVA || ''}
-                onChange={(e) => updateLine(0, "sumaCuTVA", e.target.value)}
-                onFocus={(e) => handleAmountFocus(e, 0, "sumaCuTVA")}
-                onBlur={() => handleAmountBlur(0, "sumaCuTVA")}
-                placeholder="0,00"
-                readOnly={lines[0]?.calculatedField === "sumaCuTVA"}
-                className={`flex-1 bg-transparent font-medium text-sm focus:outline-none ${lines[0]?.calculatedField === "sumaCuTVA" ? "text-gray-500" : "text-gray-900"}`}
-              />
-              {lines[0]?.calculatedField === "sumaCuTVA" && (
-                <button type="button" onClick={() => resetAmountFields(0)} className="text-gray-400 mr-2">
-                  <X size={12} />
-                </button>
-              )}
-              <span className="text-gray-400 text-sm flex items-center gap-1">
-                Lei <span className="text-xs">🇷🇴</span>
-              </span>
-            </div>
-          </MobileFormRow>
-
-          {/* Suma fara TVA */}
-          <MobileFormRow label="Suma fara TVA">
-            <div className="flex items-center justify-between">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={lines[0]?.sumaFaraTVA || ''}
-                onChange={(e) => updateLine(0, "sumaFaraTVA", e.target.value)}
-                onFocus={(e) => handleAmountFocus(e, 0, "sumaFaraTVA")}
-                onBlur={() => handleAmountBlur(0, "sumaFaraTVA")}
-                placeholder="0,00"
-                readOnly={lines[0]?.calculatedField === "sumaFaraTVA"}
-                className={`flex-1 bg-transparent font-medium text-sm focus:outline-none ${lines[0]?.calculatedField === "sumaFaraTVA" ? "text-gray-500" : "text-gray-900"}`}
-              />
-              {lines[0]?.calculatedField === "sumaFaraTVA" && (
-                <button type="button" onClick={() => resetAmountFields(0)} className="text-gray-400 mr-2">
-                  <X size={12} />
-                </button>
-              )}
-              <span className="text-gray-400 text-sm flex items-center gap-1">
-                Lei <span className="text-xs">🇷🇴</span>
-              </span>
-            </div>
-          </MobileFormRow>
-
-          {/* TVA */}
-          <MobileFormRow label="TVA">
-            <div className="flex items-center justify-between">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={lines[0]?.tva || ''}
-                onChange={(e) => updateLine(0, "tva", e.target.value)}
-                onFocus={(e) => handleAmountFocus(e, 0, "tva")}
-                onBlur={() => handleAmountBlur(0, "tva")}
-                placeholder="0,00"
-                readOnly={lines[0]?.calculatedField === "tva"}
-                className={`flex-1 bg-transparent text-sm focus:outline-none ${lines[0]?.calculatedField === "tva" ? "text-gray-400" : "text-gray-500"}`}
-              />
-              {lines[0]?.calculatedField === "tva" && (
-                <button type="button" onClick={() => resetAmountFields(0)} className="text-gray-400 mr-2">
-                  <X size={12} />
-                </button>
-              )}
-              <span className="text-gray-400 text-sm flex items-center gap-1">
-                Lei <span className="text-xs">🇷🇴</span>
-              </span>
-            </div>
-          </MobileFormRow>
-
-          {/* Cota TVA */}
-          <MobileFormRow label="Cota TVA (%)">
-            <span className="text-gray-700 text-sm">{lines[0]?.cotaTVA || '0%'}</span>
-          </MobileFormRow>
-
-          {/* Luna P&L */}
-          <MobileFormRow label="Luna P&L">
-            <div className="relative">
-              <MonthYearPicker
-                value={lines[0]?.lunaP || ''}
-                onChange={(value) => updateLine(0, "lunaP", value)}
-              />
-            </div>
-          </MobileFormRow>
-
-          {/* Cont */}
-          <MobileFormRow label="Cont">
-            <div className="relative">
-              <select
-                value={lines[0]?.categoryId || ''}
-                onChange={(e) => {
-                  updateLine(0, "categoryId", e.target.value);
-                  updateLine(0, "subcategoryId", "");
-                }}
-                className="w-full bg-transparent text-gray-700 text-sm focus:outline-none appearance-none cursor-pointer pr-6"
-              >
-                <option value="">Select...</option>
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
-                ))}
-              </select>
-              <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            </div>
-          </MobileFormRow>
-
-          {/* Subcont */}
-          <MobileFormRow label="Subcont">
-            <div className="relative">
-              <select
-                value={lines[0]?.subcategoryId || ''}
-                onChange={(e) => updateLine(0, "subcategoryId", e.target.value)}
-                disabled={!lines[0]?.categoryId}
-                className="w-full bg-transparent text-gray-400 text-sm focus:outline-none appearance-none cursor-pointer pr-6 disabled:opacity-50"
-              >
-                <option value="">Select...</option>
-                {getSubcategoriesForCategory(lines[0]?.categoryId || '').map((sub) => (
-                  <option key={sub.id} value={sub.id}>{sub.name}</option>
-                ))}
-              </select>
-              <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            </div>
-          </MobileFormRow>
-
-          {/* TVA Deductibil */}
-          <MobileFormRow label="TVA Deductibil">
-            <div className="relative">
-              <select
-                value={lines[0]?.tvaDeductibil || 'Nu'}
-                onChange={(e) => updateLine(0, "tvaDeductibil", e.target.value)}
-                className="w-full bg-transparent text-gray-700 text-sm focus:outline-none appearance-none cursor-pointer pr-6"
-              >
-                {TVA_DEDUCTIBIL_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
-              <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            </div>
-          </MobileFormRow>
-
-          {/* Tags with Autocomplete */}
-          <MobileFormRow label="Tags" noBorder>
-            <div className="relative">
-              <input
-                type="text"
-                value={lines[0]?.tags || ''}
-                onChange={(e) => {
-                  updateLine(0, "tags", e.target.value);
-                  handleTagsSearch(e.target.value, 0);
-                }}
-                onFocus={() => lines[0]?.tags && handleTagsSearch(lines[0].tags, 0)}
-                onBlur={() => setTimeout(() => setShowTagSuggestions(null), 200)}
-                placeholder="#tag1, #tag2"
-                className="w-full bg-transparent text-gray-700 placeholder-gray-400 text-sm focus:outline-none"
-              />
-              
-              {/* Mobile Tag Suggestions */}
-              {showTagSuggestions === 0 && tagSuggestions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-lg border border-gray-200 py-1 z-50 max-h-32 overflow-y-auto">
-                  {tagSuggestions.map((suggestion) => (
-                    <button
-                      key={suggestion.tag}
-                      type="button"
-                      onClick={() => handleTagSelect(suggestion.tag, 0)}
-                      className="w-full px-3 py-2 text-left hover:bg-gray-50 flex items-center justify-between"
-                    >
-                      <span className="text-gray-700 text-sm">{suggestion.tag}</span>
-                      <span className="text-gray-400 text-xs">{suggestion.count}x</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </MobileFormRow>
-        </div>
-
-        {/* Mobile Bottom Buttons */}
-        <div className="px-4 py-4 border-t border-gray-100 space-y-3">
-          <button
-            type="button"
-            onClick={addLine}
-            className="w-full flex items-center justify-center gap-2 py-3 border border-gray-200 rounded-xl text-gray-600 text-sm font-medium"
-          >
-            <Plus size={18} />
-            Adaugă produs
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSave()}
-            disabled={loading}
-            className="w-full py-4 bg-gradient-to-r from-[#11C6B6] to-[#00BFA5] text-white rounded-full text-sm font-semibold disabled:opacity-50"
-          >
-            {loading ? "Se salveaza..." : "Salvează"}
-          </button>
-        </div>
-
-        {/* Mobile Success Modal */}
-        {showSuccessModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center shadow-xl">
-              <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Check size={28} className="text-green-600" />
-              </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Cheltuiala a fost trimisa!</h3>
-              <p className="text-gray-500 text-sm mb-5">Cheltuiala a fost salvata si trimisa pentru aprobare.</p>
-              <button
-                onClick={() => router.push(`/dashboard/${teamId}/expenses`)}
-                className="w-full py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all font-medium text-sm"
-              >
-                Inapoi la cheltuieli
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Mobile Duplicate Warning Modal */}
-        {showDuplicateWarning && potentialDuplicates.length > 0 && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-              <div className="w-14 h-14 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle size={28} className="text-yellow-600" />
-              </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2 text-center">Posibil duplicat</h3>
-              <p className="text-gray-500 text-sm mb-4 text-center">
-                Exista o cheltuiala similara cu aceleasi date.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowDuplicateWarning(false)}
-                  className="flex-1 py-3 border border-gray-200 text-gray-700 rounded-full text-sm font-medium"
-                >
-                  Anuleaza
-                </button>
-                <button
-                  onClick={() => handleSave(true)}
-                  className="flex-1 py-3 bg-[#00BFA5] text-white rounded-full text-sm font-medium"
-                >
-                  Salveaza
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Mobile Draft Confirmation Modal */}
-        {showDraftConfirmModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-              <div className="w-14 h-14 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle size={28} className="text-orange-600" />
-              </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2 text-center">Campuri lipsa</h3>
-              <div className="bg-gray-50 rounded-xl p-3 mb-4 max-h-24 overflow-y-auto">
-                <ul className="text-xs text-gray-600 space-y-1">
-                  {missingFields.slice(0, 5).map((field, idx) => (
-                    <li key={idx}>• {field}</li>
-                  ))}
-                  {missingFields.length > 5 && (
-                    <li className="text-gray-400">...si altele</li>
-                  )}
-                </ul>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowDraftConfirmModal(false)}
-                  className="flex-1 py-3 border border-gray-200 text-gray-700 rounded-full text-sm font-medium"
-                >
-                  Inapoi
-                </button>
-                <button
-                  onClick={() => handleSave(true)}
-                  className="flex-1 py-3 bg-orange-500 text-white rounded-full text-sm font-medium"
-                >
-                  Salveaza Draft
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Mobile Server Error Modal */}
-        {showServerErrorModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-              <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle size={28} className="text-red-600" />
-              </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2 text-center">Eroare server</h3>
-              <p className="text-gray-500 text-sm mb-4 text-center">
-                A aparut o eroare. Va rugam incercati din nou.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowServerErrorModal(false)}
-                  className="flex-1 py-3 border border-gray-200 text-gray-700 rounded-full text-sm font-medium"
-                >
-                  Anuleaza
-                </button>
-                <button
-                  onClick={retrySave}
-                  className="flex-1 py-3 bg-teal-500 text-white rounded-full text-sm font-medium"
-                >
-                  Reincearca
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Mobile Validation Error */}
-        {validationError && (
-          <div className="fixed top-4 left-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-lg z-50 flex items-center gap-3">
-            <span className="text-sm flex-1">{validationError}</span>
-            <button onClick={() => setValidationError("")} className="text-red-500 hover:text-red-700">
-              <X size={18} />
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* ========== DESKTOP VIEW ========== */}
-      <div className="hidden md:block min-h-screen bg-[#F8F9FA] p-4 md:p-6">
-      {/* Success Modal */}
-      {showSuccessModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 text-center shadow-xl">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Check size={32} className="text-green-600" />
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Cheltuiala a fost trimisa!</h3>
-            <p className="text-gray-500 mb-6">Cheltuiala a fost salvata si trimisa pentru aprobare.</p>
-            <button
-              onClick={() => router.push(`/dashboard/${teamId}/expenses`)}
-              className="px-8 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all font-medium"
-            >
-              Inapoi la cheltuieli
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Duplicate Warning Modal */}
-      {showDuplicateWarning && potentialDuplicates.length > 0 && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-xl">
-            <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertTriangle size={32} className="text-yellow-600" />
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2 text-center">Posibil duplicat</h3>
-            <p className="text-gray-500 mb-4 text-center">
-              {formatDuplicateWarning(potentialDuplicates)}
-            </p>
-            <div className="bg-gray-50 rounded-xl p-4 mb-6">
-              <p className="text-sm text-gray-600 mb-2">Cheltuiala existenta:</p>
-              <p className="text-sm font-medium text-gray-800">
-                {potentialDuplicates[0].supplier} - {potentialDuplicates[0].docNumber || "N/A"}
-              </p>
-              <p className="text-sm text-gray-500">
-                {potentialDuplicates[0].expenseDate} | {potentialDuplicates[0].amountWithVat.toLocaleString("ro-RO", { minimumFractionDigits: 2 })} Lei
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowDuplicateWarning(false)}
-                className="flex-1 px-6 py-3 border border-gray-200 text-gray-700 rounded-full hover:bg-gray-50 transition-all font-medium"
-              >
-                Anuleaza
-              </button>
-              <button
-                onClick={() => handleSave(true)}
-                className="flex-1 px-6 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all font-medium"
-              >
-                Salveaza oricum
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Draft Confirmation Modal */}
+    <div style={{
+      width: '100%',
+      minWidth: '1728px',
+      minHeight: '100vh',
+      backgroundColor: 'rgba(248, 248, 248, 1)',
+      boxSizing: 'border-box',
+      overflowX: 'auto',
+      position: 'relative',
+      fontFamily: '"Inter", sans-serif'
+    }}>
+      {/* Dynamic styles for error placeholders */}
+      <style>{`
+        .error-placeholder::placeholder {
+          color: rgba(239, 140, 140, 1) !important;
+        }
+        .normal-placeholder::placeholder {
+          color: rgba(153, 161, 175, 1);
+        }
+      `}</style>
+      {/* Modals */}
       {showDraftConfirmModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-xl">
-            <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertTriangle size={32} className="text-orange-600" />
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2 text-center">Campuri lipsa</h3>
-            <p className="text-gray-500 mb-4 text-center">
-              Urmatoarele campuri nu sunt completate:
-            </p>
-            <div className="bg-gray-50 rounded-xl p-4 mb-6 max-h-32 overflow-y-auto">
-              <ul className="text-sm text-gray-600 space-y-1">
-                {missingFields.map((field, idx) => (
-                  <li key={idx}>• {field}</li>
-                ))}
-              </ul>
-            </div>
-            <p className="text-gray-500 mb-6 text-center text-sm">
-              Doriti sa salvati ca ciorna (Draft)?
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowDraftConfirmModal(false)}
-                className="flex-1 px-6 py-3 border border-gray-200 text-gray-700 rounded-full hover:bg-gray-50 transition-all font-medium"
-              >
-                Inapoi
-              </button>
-              <button
-                onClick={() => handleSave(true)}
-                className="flex-1 px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-full transition-all font-medium"
-              >
-                Salveaza Draft
-              </button>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} onClick={() => setShowDraftConfirmModal(false)} />
+          <div style={{ position: 'relative', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '480px', margin: '16px', padding: '32px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '16px' }}>Salvare ca Draft?</h2>
+            <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '16px' }}>Urmatoarele campuri nu sunt completate:</p>
+            <ul style={{ marginBottom: '24px', paddingLeft: '20px' }}>
+              {missingFields.map((field, i) => (
+                <li key={i} style={{ color: 'rgba(239, 68, 68, 1)', fontSize: '14px' }}>{field}</li>
+              ))}
+            </ul>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={() => setShowDraftConfirmModal(false)} style={{ ...buttonBaseStyle, flex: 1, padding: '12px 24px', border: '1px solid rgba(229, 231, 235, 1)', borderRadius: '9999px', backgroundColor: 'white' }}>Anulează</button>
+              <button onClick={() => handleSave(true)} style={{ ...buttonBaseStyle, flex: 1, padding: '12px 24px', background: 'linear-gradient(180deg, #00D492 0%, #51A2FF 100%)', color: 'white', borderRadius: '9999px' }}>Salvează Draft</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Server Error Modal with Retry */}
       {showServerErrorModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-xl">
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertTriangle size={32} className="text-red-600" />
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} onClick={() => setShowServerErrorModal(false)} />
+          <div style={{ position: 'relative', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '400px', margin: '16px', padding: '32px', textAlign: 'center' }}>
+            <AlertTriangle size={48} style={{ color: 'rgba(239, 68, 68, 1)', marginBottom: '16px' }} />
+            <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '8px' }}>Eroare la salvare</h2>
+            <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '24px' }}>A aparut o eroare. Incercati din nou.</p>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={() => setShowServerErrorModal(false)} style={{ ...buttonBaseStyle, flex: 1, padding: '12px 24px', border: '1px solid rgba(229, 231, 235, 1)', borderRadius: '9999px', backgroundColor: 'white' }}>Inchide</button>
+              <button onClick={retrySave} style={{ ...buttonBaseStyle, flex: 1, padding: '12px 24px', background: 'linear-gradient(180deg, #00D492 0%, #51A2FF 100%)', color: 'white', borderRadius: '9999px' }}>Reincearca</button>
             </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2 text-center">Eroare server</h3>
-            <p className="text-gray-500 mb-6 text-center">
-              A aparut o eroare la salvare. Va rugam incercati din nou.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowServerErrorModal(false)}
-                className="flex-1 px-6 py-3 border border-gray-200 text-gray-700 rounded-full hover:bg-gray-50 transition-all font-medium"
-              >
-                Anuleaza
-              </button>
-              <button
-                onClick={retrySave}
-                className="flex-1 px-6 py-3 bg-teal-500 hover:bg-teal-600 text-white rounded-full transition-all font-medium"
-              >
-                Reincearca
-              </button>
+          </div>
+        </div>
+      )}
+
+      {showSuccessModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} />
+          <div style={{ position: 'relative', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '400px', margin: '16px', padding: '32px', textAlign: 'center' }}>
+            <div style={{ width: '64px', height: '64px', borderRadius: '50%', backgroundColor: 'rgba(209, 250, 229, 1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <Check size={32} style={{ color: 'rgba(5, 150, 105, 1)' }} />
             </div>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '8px' }}>Salvat cu succes!</h2>
+            <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '24px' }}>Decontul a fost creat.</p>
+            <button onClick={() => router.push(`/dashboard/${teamId}/expenses`)} style={{ ...buttonBaseStyle, width: '100%', padding: '12px 24px', background: 'linear-gradient(180deg, #00D492 0%, #51A2FF 100%)', color: 'white', borderRadius: '9999px' }}>Inapoi la lista</button>
           </div>
         </div>
       )}
 
       {/* Validation Error Toast */}
       {validationError && (
-        <div className="fixed top-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-lg z-50 flex items-center gap-3">
-          <span>{validationError}</span>
-          <button onClick={() => setValidationError("")} className="text-red-500 hover:text-red-700">
-            <X size={18} />
+        <div style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 100, backgroundColor: 'rgba(254, 226, 226, 1)', border: '1px solid rgba(252, 165, 165, 1)', borderRadius: '12px', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <AlertTriangle size={20} style={{ color: 'rgba(220, 38, 38, 1)' }} />
+          <span style={{ color: 'rgba(153, 27, 27, 1)', fontSize: '14px' }}>{validationError}</span>
+          <button onClick={() => setValidationError("")} style={{ ...buttonBaseStyle, background: 'none', padding: '4px' }}>
+            <X size={16} style={{ color: 'rgba(153, 27, 27, 1)' }} />
           </button>
         </div>
       )}
 
-      <div className="max-w-[1600px] mx-auto">
-        {/* Close Button - Above header */}
-        <button
-          onClick={handleBack}
-          className="mb-3 p-2 hover:bg-gray-100 rounded-full transition-colors"
-        >
-          <X size={20} className="text-gray-500" />
-        </button>
+      {/* Header Section */}
+      <h1 style={{
+        margin: 0,
+        color: 'rgba(0, 0, 0, 1)',
+        fontSize: '24px',
+        fontWeight: 500,
+        lineHeight: '24px',
+        position: 'absolute',
+        left: '208px',
+        top: '35px'
+      }}>New Expense</h1>
+      
+      <button 
+        onMouseEnter={() => setIsHoveredBack(true)} 
+        onMouseLeave={() => setIsHoveredBack(false)}
+        onClick={handleBack}
+        style={{
+          ...buttonBaseStyle,
+          width: '45px',
+          height: '45px',
+          backgroundColor: isHoveredBack ? 'rgba(243, 244, 246, 1)' : 'rgba(255, 255, 255, 0.7)',
+          borderColor: 'rgba(229, 231, 235, 0.3)',
+          borderStyle: 'solid',
+          borderWidth: '1px',
+          borderRadius: '12px',
+          position: 'absolute',
+          left: '128px',
+          top: '24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}
+      >
+        <X size={24} style={{ color: 'rgba(107, 114, 128, 1)' }} />
+      </button>
 
-        {/* Top Header Card */}
-        <div className="bg-white rounded-[24px] p-3 mb-4 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 flex-1">
-            {/* Furnizor Input with Smart Search */}
-            <div className="relative" data-supplier-dropdown>
-              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                {searchingSupplier ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                  </svg>
-                )}
-              </div>
-              <input
-                type="text"
+      {/* Main Form Container */}
+      <div style={{
+        width: '1250px',
+        position: 'absolute',
+        left: '239px',
+        top: '93px'
+      }}>
+        
+        {/* Top Form Header */}
+        <div style={{
+          width: '1250px',
+          height: '90px',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '25px',
+          backgroundColor: 'rgba(255, 255, 255, 0.7)',
+          borderColor: 'rgba(229, 231, 235, 0.3)',
+          borderStyle: 'solid',
+          borderWidth: '1px',
+          boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
+          borderRadius: '16px',
+          boxSizing: 'border-box'
+        }}>
+          <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+            {/* Supplier Search */}
+            <div style={{ position: 'relative' }} data-supplier-dropdown>
+              <img src="https://storage.googleapis.com/storage.magicpath.ai/user/365266140869578752/figma-assets/199be80d-8f1c-421a-8a15-baed1b4f7d0a.svg" alt="Search" style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', zIndex: 1 }} />
+              <TextInput 
+                placeholder="Furnizor (nume sau CUI)"
                 value={furnizorLocked ? `${furnizor}${furnizorCui ? ` / ${furnizorCui}` : ""}` : furnizor}
                 onChange={(e) => handleSupplierSearch(e.target.value)}
                 onFocus={() => furnizor.length >= 3 && !furnizorLocked && setShowSupplierDropdown(true)}
-                placeholder="Furnizor (nume sau CUI)"
                 disabled={furnizorLocked}
-                className={`pl-10 pr-8 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-300 transition-all shadow-sm w-64 ${furnizorLocked ? "bg-gray-50" : ""}`}
-                style={{ fontSize: "0.875rem", fontWeight: 400 }}
+                className={hasHeaderFieldError('furnizor') ? 'error-placeholder' : 'normal-placeholder'}
+                style={{ 
+                  width: '220px', 
+                  height: '40px', 
+                  paddingLeft: '36px',
+                  backgroundColor: hasHeaderFieldError('furnizor') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
+                  borderColor: hasHeaderFieldError('furnizor') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'
+                }} 
               />
+              {searchingSupplier && <Loader2 size={14} className="animate-spin" style={{ position: 'absolute', right: '12px', top: '13px', color: 'rgba(156, 163, 175, 1)' }} />}
               {furnizorLocked && (
-                <button
-                  type="button"
-                  onClick={handleSupplierUnlock}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  <X size={14} />
+                <button onClick={handleSupplierUnlock} style={{ ...buttonBaseStyle, position: 'absolute', right: '12px', top: '12px', background: 'none', padding: '2px' }}>
+                  <X size={14} style={{ color: 'rgba(156, 163, 175, 1)' }} />
                 </button>
               )}
               
-              {/* Supplier Search Dropdown */}
+              {/* Supplier Dropdown */}
               {showSupplierDropdown && supplierSearchResults.length > 0 && (
-                <div className="absolute top-full left-0 mt-1 w-80 bg-white rounded-xl shadow-lg border border-gray-200/60 py-1 z-50 max-h-64 overflow-y-auto">
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '8px', backgroundColor: 'white', borderRadius: '12px', boxShadow: '0px 10px 25px rgba(0, 0, 0, 0.15)', border: '1px solid rgba(229, 231, 235, 1)', padding: '4px 0', zIndex: 50, maxHeight: '200px', overflowY: 'auto' }}>
                   {supplierSearchResults.map((supplier, idx) => (
-                    <button
-                      key={supplier.cui || idx}
-                      type="button"
-                      onClick={() => handleSupplierSelect(supplier)}
-                      className="w-full px-4 py-2.5 text-left hover:bg-gray-50 flex flex-col"
-                    >
-                      <span className="text-gray-800 font-medium" style={{ fontSize: "0.875rem" }}>
-                        {supplier.name}
-                      </span>
-                      {supplier.cui && (
-                        <span className="text-gray-500" style={{ fontSize: "0.75rem" }}>
-                          CUI: {supplier.cui}
-                        </span>
-                      )}
+                    <button key={supplier.cui || idx} onClick={() => handleSupplierSelect(supplier)} style={{ ...buttonBaseStyle, width: '100%', padding: '10px 16px', textAlign: 'left', background: 'none', display: 'block' }}>
+                      <span style={{ display: 'block', fontWeight: 500, color: 'rgba(17, 24, 39, 1)', fontSize: '14px' }}>{supplier.name}</span>
+                      {supplier.cui && <span style={{ display: 'block', fontSize: '12px', color: 'rgba(107, 114, 128, 1)' }}>CUI: {supplier.cui}</span>}
                     </button>
                   ))}
                 </div>
               )}
-              
-              {/* No results or error message */}
-              {showSupplierDropdown && supplierSearchResults.length === 0 && furnizor.length >= 3 && !searchingSupplier && (
-                <div className="absolute top-full left-0 mt-1 w-80 bg-white rounded-xl shadow-lg border border-gray-200/60 p-4 z-50">
-                  {supplierSearchError ? (
-                    <div className="flex items-center justify-between">
-                      <p className="text-red-500 text-sm">Eroare la cautare</p>
-                      <button
-                        type="button"
-                        onClick={retrySupplierSearch}
-                        className="text-teal-600 hover:text-teal-700 text-sm font-medium"
-                      >
-                        Reincearca
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 text-sm">Nu s-au gasit rezultate</p>
-                  )}
+            </div>
+            
+            {/* Doc Type Dropdown */}
+            <div style={{ position: 'relative' }}>
+              <button 
+                onClick={() => setShowDocTypeDropdown(!showDocTypeDropdown)}
+                style={{
+                  ...buttonBaseStyle,
+                  width: '140px',
+                  height: '40px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '0 16px',
+                  backgroundColor: 'white',
+                  border: '1px solid rgba(209, 213, 220, 0.5)',
+                  borderRadius: '9999px',
+                  boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)'
+                }}
+              >
+                <span style={{ color: docType ? 'rgba(16, 24, 40, 1)' : 'rgba(153, 161, 175, 1)', fontSize: '14px' }}>{docType || 'Tip'}</span>
+                <ChevronDown size={18} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+              </button>
+              {showDocTypeDropdown && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '8px', backgroundColor: 'white', borderRadius: '12px', boxShadow: '0px 10px 25px rgba(0, 0, 0, 0.15)', border: '1px solid rgba(229, 231, 235, 1)', padding: '4px 0', zIndex: 50, minWidth: '140px' }}>
+                  {DOC_TYPES.map(type => (
+                    <button key={type} onClick={() => { setDocType(type); setShowDocTypeDropdown(false); }} style={{ ...buttonBaseStyle, width: '100%', padding: '10px 16px', textAlign: 'left', background: docType === type ? 'rgba(240, 253, 250, 1)' : 'none', color: docType === type ? 'rgba(13, 148, 136, 1)' : 'rgba(55, 65, 81, 1)', fontSize: '14px' }}>
+                      {type}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
 
-            {/* Doc Type Dropdown */}
-            <SelectDropdown
-              value={docType}
-              options={DOC_TYPES}
-              isOpen={showDocTypeDropdown}
-              onToggle={() => setShowDocTypeDropdown(!showDocTypeDropdown)}
-              onChange={setDocType}
-            />
-
-            {/* NrDoc Input */}
-            <input
-              type="text"
-              value={nrDoc}
-              onChange={(e) => setNrDoc(e.target.value)}
-              placeholder="NrDoc"
-              className="px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-300 transition-all shadow-sm w-32"
-              style={{ fontSize: "0.875rem", fontWeight: 400 }}
-            />
-
-            {/* Date Picker with Validation */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowDatePicker(true)}
-                className="px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-700 hover:bg-gray-50 transition-all shadow-sm min-w-[120px]"
-                style={{ fontSize: "0.875rem", fontWeight: 400 }}
-              >
-                {formatDateDisplay(selectedDate)}
+            <TextInput placeholder="NrDoc" value={nrDoc} onChange={(e) => setNrDoc(e.target.value)} style={{ width: '120px', height: '40px' }} />
+            
+            {/* Date Picker */}
+            <div style={{ position: 'relative' }}>
+              <button onClick={() => setShowDatePicker(true)} style={{ ...buttonBaseStyle, width: '140px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', backgroundColor: 'rgba(255, 255, 255, 0.7)', border: '1px solid rgba(209, 213, 220, 0.5)', borderRadius: '9999px', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)' }}>
+                <span style={{ color: 'rgba(16, 24, 40, 1)', fontSize: '14px' }}>{formatDateDisplay(selectedDate)}</span>
               </button>
               {showDatePicker && (
                 <CalendarModal
@@ -1667,415 +933,505 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
               )}
             </div>
 
-            {/* Plata Dropdown */}
-            <SelectDropdown
-              value={plata}
-              options={PAYMENT_STATUS}
-              isOpen={showPlataDropdown}
-              onToggle={() => setShowPlataDropdown(!showPlataDropdown)}
-              onChange={setPlata}
-            />
-          </div>
+            {/* Payment Status */}
+            <div style={{ position: 'relative' }}>
+              <button 
+                onClick={() => setShowPlataDropdown(!showPlataDropdown)}
+                style={{
+                  ...buttonBaseStyle,
+                  width: '120px',
+                  height: '40px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '0 16px',
+                  backgroundColor: 'white',
+                  border: '1px solid rgba(209, 213, 220, 0.5)',
+                  borderRadius: '9999px',
+                  boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)'
+                }}
+              >
+                <span style={{ color: 'rgba(16, 24, 40, 1)', fontSize: '14px' }}>{plata}</span>
+                <ChevronDown size={18} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+              </button>
+              {showPlataDropdown && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '8px', backgroundColor: 'white', borderRadius: '12px', boxShadow: '0px 10px 25px rgba(0, 0, 0, 0.15)', border: '1px solid rgba(229, 231, 235, 1)', padding: '4px 0', zIndex: 50, minWidth: '120px' }}>
+                  {PAYMENT_STATUS.map(status => (
+                    <button key={status} onClick={() => { setPlata(status); setShowPlataDropdown(false); }} style={{ ...buttonBaseStyle, width: '100%', padding: '10px 16px', textAlign: 'left', background: plata === status ? 'rgba(240, 253, 250, 1)' : 'none', color: plata === status ? 'rgba(13, 148, 136, 1)' : 'rgba(55, 65, 81, 1)', fontSize: '14px' }}>
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
-          {/* Upload Document Button - Top Right */}
-          <label className="flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-100 rounded-full text-gray-600 hover:bg-gray-50 transition-all shadow-sm cursor-pointer ml-auto">
-            <span style={{ fontSize: "0.875rem", fontWeight: 400 }}>
-              {uploadedFiles.length > 0 ? `${uploadedFiles.length} fisier${uploadedFiles.length > 1 ? 'e' : ''}` : 'Incarcă document'}
-            </span>
-            <Upload size={16} className="text-gray-400" />
-            <input
-              type="file"
-              accept="image/*,application/pdf"
-              onChange={handleFileUpload}
-              multiple
-              className="hidden"
-            />
-          </label>
+            {/* Upload Button */}
+            <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple accept="image/*,application/pdf" style={{ display: 'none' }} />
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                ...buttonBaseStyle,
+                marginLeft: 'auto',
+                width: '177px',
+                height: '40px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                backgroundColor: hasHeaderFieldError('document') ? errorBgStyle : 'white',
+                border: `1px solid ${hasHeaderFieldError('document') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'}`,
+                borderRadius: '9999px',
+                boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)'
+              }}
+            >
+              <span style={{ color: hasHeaderFieldError('document') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '14px' }}>
+                {uploadedFiles.length > 0 ? `${uploadedFiles.length} fisier${uploadedFiles.length > 1 ? 'e' : ''}` : 'Încarcă document'}
+              </span>
+              <Upload size={16} style={{ color: hasHeaderFieldError('document') ? errorTextStyle : 'rgba(107, 114, 128, 1)' }} />
+            </button>
+          </div>
         </div>
 
-        {/* Main Content - Two Separate Columns */}
-        <div className="flex gap-4 mb-4 items-start">
-          {/* Left Column - Stack of Form Cards */}
-          <div className="flex-shrink-0 w-[480px] space-y-4">
+        {/* Form Details Area */}
+        <div style={{ display: 'flex', gap: '16px', marginTop: '12px' }}>
+          {/* Left Column - Form Fields */}
+          <div style={{ width: '493.5px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {lines.map((line, index) => (
-              <div key={index} data-line-index={index} className="bg-white rounded-[24px] p-8 pb-10 shadow-[0_2px_10px_rgba(0,0,0,0.02)] relative group">
+              <div key={index} style={{
+                padding: '33px 25px 25px 25px',
+                backgroundColor: 'rgba(255, 255, 255, 0.7)',
+                border: '1px solid rgba(229, 231, 235, 0.3)',
+                borderRadius: '16px',
+                boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
+                position: 'relative'
+              }}>
                 {lines.length > 1 && (
-                  <button
-                    onClick={() => {
-                      const newLines = [...lines];
-                      newLines.splice(index, 1);
-                      setLines(newLines);
-                    }}
-                    className="absolute -right-3 -top-3 p-2 bg-white rounded-full shadow-md text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all z-10"
-                  >
-                    <X size={16} />
+                  <button onClick={() => setLines(lines.filter((_, i) => i !== index))} style={{ ...buttonBaseStyle, position: 'absolute', right: '-10px', top: '-10px', width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'white', border: '1px solid rgba(229, 231, 235, 1)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)' }}>
+                    <X size={14} style={{ color: 'rgba(239, 68, 68, 1)' }} />
                   </button>
                 )}
-                <div className="flex flex-col gap-3">
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   {/* Descriere */}
-                  <div className="flex items-start gap-4">
-                    <label className="text-gray-500 w-28 flex-shrink-0 pt-3" style={{ fontSize: "0.8125rem", fontWeight: 400 }}>
-                      Descriere
-                    </label>
-                    <textarea
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <label style={{ width: '128px', color: hasFieldError(index, 'descriere') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200, paddingTop: '10px' }}>Descriere</label>
+                    <textarea 
+                      placeholder="Adauga descriere..." 
                       value={line.descriere}
                       onChange={(e) => updateLine(index, "descriere", e.target.value)}
-                      placeholder="Adauga descriere..."
-                      rows={1}
-                      className="flex-1 px-4 py-2.5 bg-[#F8F9FA] border-none rounded-2xl text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-200 transition-all resize-none overflow-y-auto min-h-[42px] max-h-[120px]"
-                      style={{ fontSize: "0.875rem", fontWeight: 400 }}
-                      onInput={(e) => {
-                        const target = e.target as HTMLTextAreaElement;
-                        target.style.height = "auto";
-                        target.style.height = Math.min(target.scrollHeight, 120) + "px";
-                      }}
+                      className={hasFieldError(index, 'descriere') ? 'error-placeholder' : 'normal-placeholder'}
+                      style={{ 
+                        width: '296px', 
+                        height: '64px', 
+                        padding: '10px 16px', 
+                        backgroundColor: hasFieldError(index, 'descriere') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)', 
+                        border: `1px solid ${hasFieldError(index, 'descriere') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'}`, 
+                        borderRadius: '16px', 
+                        fontSize: '14px', 
+                        fontFamily: 'inherit', 
+                        resize: 'none', 
+                        outline: 'none'
+                      }} 
                     />
                   </div>
 
                   {/* Suma cu TVA */}
-                  <div className="flex items-center gap-4">
-                    <label className="text-gray-500 w-28 flex-shrink-0" style={{ fontSize: "0.8125rem", fontWeight: 400 }}>
-                      Suma cu TVA
-                    </label>
-                    <div className={`flex-1 flex items-center justify-between px-4 py-2 rounded-xl ${line.calculatedField === "sumaCuTVA" ? "bg-gray-100" : "bg-white"}`}>
-                      <input
-                        type="text"
-                        inputMode="decimal"
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <label style={{ width: '128px', color: hasFieldError(index, 'sumaCuTVA') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Suma cu TVA</label>
+                    <div style={{ position: 'relative', width: '296px' }}>
+                      <TextInput 
+                        placeholder="0,00"
                         value={line.sumaCuTVA}
                         onChange={(e) => updateLine(index, "sumaCuTVA", e.target.value)}
-                        onFocus={(e) => handleAmountFocus(e, index, "sumaCuTVA")}
                         onBlur={() => handleAmountBlur(index, "sumaCuTVA")}
-                        placeholder="0,00"
                         readOnly={line.calculatedField === "sumaCuTVA"}
-                        className={`w-full bg-transparent border-none focus:outline-none font-medium ${line.calculatedField === "sumaCuTVA" ? "text-gray-500" : "text-gray-900"}`}
-                        style={{ fontSize: "0.9375rem" }}
+                        className={hasFieldError(index, 'sumaCuTVA') ? 'error-placeholder' : 'normal-placeholder'}
+                        style={{ 
+                          paddingRight: '70px', 
+                          backgroundColor: line.calculatedField === "sumaCuTVA" ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'sumaCuTVA') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
+                          borderColor: hasFieldError(index, 'sumaCuTVA') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'
+                        }} 
                       />
-                      {line.calculatedField === "sumaCuTVA" && (
-                        <button
-                          type="button"
-                          onClick={() => resetAmountFields(index)}
-                          className="text-gray-400 hover:text-gray-600 mr-2"
-                          title="Reseteaza toate campurile"
-                        >
-                          <X size={14} />
-                        </button>
-                      )}
-                      <span className="text-gray-400 flex items-center gap-1.5 flex-shrink-0 ml-2" style={{ fontSize: "0.8125rem" }}>
-                        Lei <span className="text-sm">🇷🇴</span>
-                      </span>
+                      <div style={{ position: 'absolute', right: '16px', top: '9px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {line.calculatedField === "sumaCuTVA" && (
+                          <button onClick={() => resetAmountFields(index)} style={{ ...buttonBaseStyle, background: 'none', padding: '2px' }}>
+                            <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                          </button>
+                        )}
+                        <span style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>Lei</span>
+                        <span style={{ fontSize: '12px' }}>🇷🇴</span>
+                      </div>
                     </div>
                   </div>
 
                   {/* Suma fara TVA */}
-                  <div className="flex items-center gap-4">
-                    <label className="text-gray-500 w-28 flex-shrink-0" style={{ fontSize: "0.8125rem", fontWeight: 400 }}>
-                      Suma fara TVA
-                    </label>
-                    <div className={`flex-1 flex items-center justify-between px-4 py-2 rounded-xl ${line.calculatedField === "sumaFaraTVA" ? "bg-gray-100" : "bg-white"}`}>
-                      <input
-                        type="text"
-                        inputMode="decimal"
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <label style={{ width: '128px', color: hasFieldError(index, 'sumaFaraTVA') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Suma fara TVA</label>
+                    <div style={{ position: 'relative', width: '296px' }}>
+                      <TextInput 
+                        placeholder="0,00"
                         value={line.sumaFaraTVA}
                         onChange={(e) => updateLine(index, "sumaFaraTVA", e.target.value)}
-                        onFocus={(e) => handleAmountFocus(e, index, "sumaFaraTVA")}
                         onBlur={() => handleAmountBlur(index, "sumaFaraTVA")}
-                        placeholder="0,00"
                         readOnly={line.calculatedField === "sumaFaraTVA"}
-                        className={`w-full bg-transparent border-none focus:outline-none font-medium ${line.calculatedField === "sumaFaraTVA" ? "text-gray-500" : "text-gray-900"}`}
-                        style={{ fontSize: "0.9375rem" }}
+                        className={hasFieldError(index, 'sumaFaraTVA') ? 'error-placeholder' : 'normal-placeholder'}
+                        style={{ 
+                          paddingRight: '70px', 
+                          backgroundColor: line.calculatedField === "sumaFaraTVA" ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'sumaFaraTVA') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
+                          borderColor: hasFieldError(index, 'sumaFaraTVA') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'
+                        }} 
                       />
-                      {line.calculatedField === "sumaFaraTVA" && (
-                        <button
-                          type="button"
-                          onClick={() => resetAmountFields(index)}
-                          className="text-gray-400 hover:text-gray-600 mr-2"
-                          title="Reseteaza toate campurile"
-                        >
-                          <X size={14} />
-                        </button>
-                      )}
-                      <span className="text-gray-400 flex items-center gap-1.5 flex-shrink-0 ml-2" style={{ fontSize: "0.8125rem" }}>
-                        Lei <span className="text-sm">🇷🇴</span>
-                      </span>
+                      <div style={{ position: 'absolute', right: '16px', top: '9px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {line.calculatedField === "sumaFaraTVA" && (
+                          <button onClick={() => resetAmountFields(index)} style={{ ...buttonBaseStyle, background: 'none', padding: '2px' }}>
+                            <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                          </button>
+                        )}
+                        <span style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>Lei</span>
+                        <span style={{ fontSize: '12px' }}>🇷🇴</span>
+                      </div>
                     </div>
                   </div>
 
                   {/* TVA */}
-                  <div className="flex items-center gap-4">
-                    <label className="text-gray-500 w-28 flex-shrink-0" style={{ fontSize: "0.8125rem", fontWeight: 400 }}>
-                      TVA
-                    </label>
-                    <div className={`flex-1 flex items-center justify-between px-4 py-2 rounded-xl ${line.calculatedField === "tva" ? "bg-gray-100" : "bg-white"}`}>
-                      <input
-                        type="text"
-                        inputMode="decimal"
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <label style={{ width: '128px', color: hasFieldError(index, 'tva') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>TVA</label>
+                    <div style={{ position: 'relative', width: '296px' }}>
+                      <TextInput 
+                        placeholder="0,00"
                         value={line.tva}
                         onChange={(e) => updateLine(index, "tva", e.target.value)}
-                        onFocus={(e) => handleAmountFocus(e, index, "tva")}
                         onBlur={() => handleAmountBlur(index, "tva")}
-                        placeholder="0,00"
                         readOnly={line.calculatedField === "tva"}
-                        className={`w-full bg-transparent border-none focus:outline-none ${line.calculatedField === "tva" ? "text-gray-400" : "text-gray-500"}`}
-                        style={{ fontSize: "0.9375rem" }}
+                        className={hasFieldError(index, 'tva') ? 'error-placeholder' : 'normal-placeholder'}
+                        style={{ 
+                          paddingRight: '70px', 
+                          backgroundColor: line.calculatedField === "tva" ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'tva') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
+                          borderColor: hasFieldError(index, 'tva') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'
+                        }} 
                       />
-                      {line.calculatedField === "tva" && (
-                        <button
-                          type="button"
-                          onClick={() => resetAmountFields(index)}
-                          className="text-gray-400 hover:text-gray-600 mr-2"
-                          title="Reseteaza toate campurile"
-                        >
-                          <X size={14} />
-                        </button>
-                      )}
-                      <span className="text-gray-400 flex items-center gap-1.5 flex-shrink-0 ml-2" style={{ fontSize: "0.8125rem" }}>
-                        Lei <span className="text-sm">🇷🇴</span>
-                      </span>
+                      <div style={{ position: 'absolute', right: '16px', top: '9px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {line.calculatedField === "tva" && (
+                          <button onClick={() => resetAmountFields(index)} style={{ ...buttonBaseStyle, background: 'none', padding: '2px' }}>
+                            <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                          </button>
+                        )}
+                        <span style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>Lei</span>
+                        <span style={{ fontSize: '12px' }}>🇷🇴</span>
+                      </div>
                     </div>
                   </div>
 
                   {/* Cota TVA */}
-                  <div className="flex items-center gap-4">
-                    <label className="text-gray-500 w-28 flex-shrink-0" style={{ fontSize: "0.8125rem", fontWeight: 400 }}>
-                      Cota TVA (%)
-                    </label>
-                    <div className="flex-1 px-4 py-2.5 bg-[#F8F9FA] rounded-xl text-gray-700">
-                      {line.cotaTVA}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <label style={{ width: '128px', color: 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Cota TVA (%)</label>
+                    <div style={{ width: '296px', height: '36px', padding: '0 16px', backgroundColor: 'rgba(243, 244, 246, 0.5)', border: '1px solid rgba(209, 213, 220, 0.5)', borderRadius: '9999px', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ color: 'rgba(74, 85, 101, 0.5)', fontSize: '14px' }}>{line.cotaTVA || '-'}</span>
                     </div>
                   </div>
 
                   {/* Luna P&L */}
-                  <div className="flex items-center gap-4">
-                    <label className="text-gray-500 w-28 flex-shrink-0" style={{ fontSize: "0.8125rem", fontWeight: 400 }}>
-                      Luna P&L
-                    </label>
-                    <div className="flex-1">
-                      <MonthYearPicker
-                        value={line.lunaP}
-                        onChange={(value) => updateLine(index, "lunaP", value)}
-                      />
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <label style={{ width: '128px', color: 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Luna P&L</label>
+                    <div style={{ position: 'relative', width: '296px' }}>
+                      <button 
+                        onClick={() => {
+                          if (openMonthPickerIndex === index) {
+                            setOpenMonthPickerIndex(-1);
+                          } else {
+                            // Parse current lunaP to set the year
+                            const parts = line.lunaP.split(' ');
+                            if (parts.length === 2) {
+                              setMonthPickerYear(parseInt(parts[1]) || new Date().getFullYear());
+                            }
+                            setOpenMonthPickerIndex(index);
+                          }
+                        }}
+                        style={{ ...buttonBaseStyle, width: '100%', height: '36px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 16px', backgroundColor: 'white', border: '1px solid rgba(209, 213, 220, 0.5)', borderRadius: '9999px', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)' }}
+                      >
+                        <span style={{ color: 'rgba(16, 24, 40, 1)', fontSize: '14px' }}>{line.lunaP}</span>
+                        <ChevronDown size={18} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                      </button>
+                      
+                      {/* Month Picker Dropdown */}
+                      {openMonthPickerIndex === index && (
+                        <>
+                          <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpenMonthPickerIndex(-1)} />
+                          <div style={{ 
+                            position: 'absolute', 
+                            top: '100%', 
+                            left: 0, 
+                            marginTop: '8px', 
+                            backgroundColor: 'white', 
+                            borderRadius: '16px', 
+                            boxShadow: '0px 10px 25px rgba(0, 0, 0, 0.15)', 
+                            border: '1px solid rgba(229, 231, 235, 1)', 
+                            padding: '16px',
+                            zIndex: 50,
+                            width: '280px'
+                          }}>
+                            {/* Year Navigation */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setMonthPickerYear(y => y - 1); }}
+                                style={{ ...buttonBaseStyle, background: 'none', padding: '8px', color: 'rgba(107, 114, 128, 1)' }}
+                              >
+                                <ChevronDown size={18} style={{ transform: 'rotate(90deg)' }} />
+                              </button>
+                              <span style={{ fontSize: '16px', fontWeight: 600, color: 'rgba(17, 24, 39, 1)' }}>{monthPickerYear}</span>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setMonthPickerYear(y => y + 1); }}
+                                style={{ ...buttonBaseStyle, background: 'none', padding: '8px', color: 'rgba(107, 114, 128, 1)' }}
+                              >
+                                <ChevronDown size={18} style={{ transform: 'rotate(-90deg)' }} />
+                              </button>
+                            </div>
+                            
+                            {/* Month Grid */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                              {MONTHS_RO.map((month, monthIdx) => {
+                                const isSelected = line.lunaP === `${MONTHS_RO_LOWER[monthIdx]} ${monthPickerYear}`;
+                                return (
+                                  <button
+                                    key={month}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      updateLine(index, "lunaP", `${MONTHS_RO_LOWER[monthIdx]} ${monthPickerYear}`);
+                                      setOpenMonthPickerIndex(-1);
+                                    }}
+                                    style={{
+                                      ...buttonBaseStyle,
+                                      padding: '10px 8px',
+                                      backgroundColor: isSelected ? 'rgba(240, 253, 250, 1)' : 'transparent',
+                                      border: isSelected ? '1px solid rgba(13, 148, 136, 0.3)' : '1px solid transparent',
+                                      borderRadius: '8px',
+                                      color: isSelected ? 'rgba(13, 148, 136, 1)' : 'rgba(55, 65, 81, 1)',
+                                      fontSize: '13px',
+                                      fontWeight: isSelected ? 500 : 400,
+                                      textAlign: 'center'
+                                    }}
+                                  >
+                                    {month}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 
                   {/* Cont */}
-                  <div className="flex items-center gap-4">
-                    <label className="text-gray-500 w-28 flex-shrink-0" style={{ fontSize: "0.8125rem", fontWeight: 400 }}>
-                      Cont
-                    </label>
-                    <div className="relative flex-1">
-                      <select
-                        value={line.categoryId}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <label style={{ width: '128px', color: hasFieldError(index, 'categoryId') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Cont</label>
+                    <div style={{ position: 'relative', width: '296px' }}>
+                      <select 
+                        value={line.categoryId} 
                         onChange={(e) => {
                           updateLine(index, "categoryId", e.target.value);
                           updateLine(index, "subcategoryId", "");
                         }}
-                        className="w-full px-4 py-2.5 bg-[#F8F9FA] border-none rounded-xl text-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-200 transition-all appearance-none cursor-pointer"
-                        style={{ fontSize: "0.875rem" }}
+                        style={{ 
+                          width: '100%', 
+                          height: '36px', 
+                          padding: '0 32px 0 16px', 
+                          backgroundColor: hasFieldError(index, 'categoryId') ? errorBgStyle : 'white', 
+                          border: `1px solid ${hasFieldError(index, 'categoryId') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'}`, 
+                          borderRadius: '9999px', 
+                          fontSize: '14px', 
+                          appearance: 'none', 
+                          cursor: 'pointer', 
+                          outline: 'none', 
+                          color: hasFieldError(index, 'categoryId') ? errorTextStyle : line.categoryId ? 'rgba(16, 24, 40, 1)' : 'rgba(153, 161, 175, 1)' 
+                        }}
                       >
                         <option value="">Select...</option>
-                        {categories.map((cat) => (
+                        {categories.map(cat => (
                           <option key={cat.id} value={cat.id}>{cat.name}</option>
                         ))}
                       </select>
-                      <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <ChevronDown size={18} style={{ position: 'absolute', right: '12px', top: '9px', color: 'rgba(156, 163, 175, 1)', pointerEvents: 'none' }} />
                     </div>
                   </div>
 
                   {/* Subcont */}
-                  <div className="flex items-center gap-4">
-                    <label className="text-gray-500 w-28 flex-shrink-0" style={{ fontSize: "0.8125rem", fontWeight: 400 }}>
-                      Subcont
-                    </label>
-                    <div className="relative flex-1">
-                      <select
-                        value={line.subcategoryId}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <label style={{ width: '128px', color: 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Subcont</label>
+                    <div style={{ position: 'relative', width: '296px' }}>
+                      <select 
+                        value={line.subcategoryId} 
                         onChange={(e) => updateLine(index, "subcategoryId", e.target.value)}
                         disabled={!line.categoryId}
-                        className="w-full px-4 py-2.5 bg-[#F8F9FA] border-none rounded-xl text-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-200 transition-all appearance-none cursor-pointer disabled:opacity-50"
-                        style={{ fontSize: "0.875rem" }}
+                        style={{ 
+                          width: '100%', 
+                          height: '36px', 
+                          padding: '0 32px 0 16px', 
+                          backgroundColor: line.categoryId ? 'white' : 'rgba(243, 244, 246, 0.5)', 
+                          border: '1px solid rgba(209, 213, 220, 0.5)', 
+                          borderRadius: '9999px', 
+                          fontSize: '14px', 
+                          appearance: 'none', 
+                          cursor: line.categoryId ? 'pointer' : 'not-allowed', 
+                          outline: 'none', 
+                          color: line.subcategoryId ? 'rgba(16, 24, 40, 1)' : 'rgba(153, 161, 175, 1)' 
+                        }}
                       >
                         <option value="">Select...</option>
-                        {getSubcategoriesForCategory(line.categoryId).map((sub) => (
+                        {getSubcategoriesForCategory(line.categoryId).map(sub => (
                           <option key={sub.id} value={sub.id}>{sub.name}</option>
                         ))}
                       </select>
-                      <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <ChevronDown size={18} style={{ position: 'absolute', right: '12px', top: '9px', color: 'rgba(156, 163, 175, 1)', pointerEvents: 'none' }} />
                     </div>
                   </div>
 
                   {/* TVA Deductibil */}
-                  <div className="flex items-center gap-4">
-                    <label className="text-gray-500 w-28 flex-shrink-0" style={{ fontSize: "0.8125rem", fontWeight: 400 }}>
-                      TVA Deductibil
-                    </label>
-                    <div className="relative flex-1">
-                      <select
-                        value={line.tvaDeductibil}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <label style={{ width: '128px', color: 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>TVA Deductibil</label>
+                    <div style={{ position: 'relative', width: '296px' }}>
+                      <select 
+                        value={line.tvaDeductibil} 
                         onChange={(e) => updateLine(index, "tvaDeductibil", e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white border border-gray-100 rounded-xl text-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-200 transition-all appearance-none cursor-pointer font-medium"
-                        style={{ fontSize: "0.875rem" }}
+                        style={{ width: '100%', height: '36px', padding: '0 32px 0 16px', backgroundColor: 'white', border: '1px solid rgba(209, 213, 220, 0.5)', borderRadius: '9999px', fontSize: '14px', appearance: 'none', cursor: 'pointer', outline: 'none', color: 'rgba(16, 24, 40, 1)' }}
                       >
-                        {TVA_DEDUCTIBIL_OPTIONS.map((opt) => (
+                        {TVA_DEDUCTIBIL_OPTIONS.map(opt => (
                           <option key={opt} value={opt}>{opt}</option>
                         ))}
                       </select>
-                      <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <ChevronDown size={18} style={{ position: 'absolute', right: '12px', top: '9px', color: 'rgba(156, 163, 175, 1)', pointerEvents: 'none' }} />
                     </div>
                   </div>
 
-                  {/* Tags with Autocomplete */}
-                  <div className="flex items-center gap-4">
-                    <label className="text-gray-500 w-28 flex-shrink-0" style={{ fontSize: "0.8125rem", fontWeight: 400 }}>
-                      Tags
-                    </label>
-                    <div className="flex-1 relative">
-                      <input
-                        type="text"
-                        value={line.tags}
-                        onChange={(e) => {
-                          updateLine(index, "tags", e.target.value);
-                          handleTagsSearch(e.target.value, index);
-                        }}
-                        onFocus={() => line.tags && handleTagsSearch(line.tags, index)}
-                        onBlur={() => setTimeout(() => setShowTagSuggestions(null), 200)}
-                        placeholder="#tag1, #tag2"
-                        className="w-full px-4 py-2.5 bg-[#F8F9FA] border-none rounded-xl text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-200 transition-all"
-                        style={{ fontSize: "0.875rem", fontWeight: 400 }}
-                      />
-                      
-                      {/* Tag Suggestions Dropdown */}
-                      {showTagSuggestions === index && tagSuggestions.length > 0 && (
-                        <div className="absolute top-full left-0 mt-1 w-full bg-white rounded-xl shadow-lg border border-gray-200/60 py-1 z-50 max-h-48 overflow-y-auto">
-                          {tagSuggestions.map((suggestion) => (
-                            <button
-                              key={suggestion.tag}
-                              type="button"
-                              onClick={() => handleTagSelect(suggestion.tag, index)}
-                              className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center justify-between"
-                            >
-                              <span className="text-gray-700" style={{ fontSize: "0.875rem" }}>
-                                {suggestion.tag}
-                              </span>
-                              <span className="text-gray-400" style={{ fontSize: "0.75rem" }}>
-                                {suggestion.count}x
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                  {/* Tags */}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <label style={{ width: '128px', color: 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Tags</label>
+                    <TextInput 
+                      placeholder="#tags" 
+                      value={line.tags}
+                      onChange={(e) => updateLine(index, "tags", e.target.value)}
+                      className="normal-placeholder"
+                    />
                   </div>
                 </div>
               </div>
             ))}
-          </div>
 
-          {/* Right Card - Document Upload Area */}
-          <div className="flex-1">
-            <div className="bg-white rounded-[24px] p-8 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center min-h-[500px]">
-              {uploadedFiles.length > 0 ? (
-                <div className="w-full h-full flex flex-col">
-                  {/* File navigation for multiple files */}
-                  {uploadedFiles.length > 1 && (
-                    <div className="flex items-center justify-between mb-4 px-2">
-                      <button
-                        type="button"
-                        onClick={() => setActivePreviewIndex(Math.max(0, activePreviewIndex - 1))}
-                        disabled={activePreviewIndex === 0}
-                        className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-30"
-                      >
-                        <ChevronDown size={20} className="rotate-90" />
-                      </button>
-                      <span className="text-sm text-gray-500">
-                        {activePreviewIndex + 1} / {uploadedFiles.length}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setActivePreviewIndex(Math.min(uploadedFiles.length - 1, activePreviewIndex + 1))}
-                        disabled={activePreviewIndex === uploadedFiles.length - 1}
-                        className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-30"
-                      >
-                        <ChevronDown size={20} className="-rotate-90" />
-                      </button>
-                    </div>
-                  )}
-                  
-                  {/* Preview area */}
-                  <div className="flex-1 flex items-center justify-center">
-                    {uploadedFiles[activePreviewIndex]?.preview.startsWith("data:image") ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={uploadedFiles[activePreviewIndex].preview}
-                        alt="Document preview"
-                        className="max-w-full max-h-[400px] object-contain rounded-lg"
-                      />
-                    ) : (
-                      <div className="text-center">
-                        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                          <Upload size={24} className="text-gray-400" />
-                        </div>
-                        <p className="text-gray-600 text-sm">{uploadedFiles[activePreviewIndex]?.name}</p>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* File list */}
-                  <div className="mt-4 space-y-2 max-h-32 overflow-y-auto">
-                    {uploadedFiles.map((file, idx) => (
-                      <div 
-                        key={idx} 
-                        className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer ${idx === activePreviewIndex ? 'bg-teal-50 border border-teal-200' : 'bg-gray-50 hover:bg-gray-100'}`}
-                        onClick={() => setActivePreviewIndex(idx)}
-                      >
-                        <span className="text-sm text-gray-700 truncate flex-1">{file.name}</span>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); removeUploadedFile(idx); }}
-                          className="ml-2 text-red-400 hover:text-red-600"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center">
-                  <div className="mb-6">
-                    <Upload size={48} className="text-gray-200" strokeWidth={1.5} />
-                  </div>
-                  <p className="text-gray-400" style={{ fontSize: "0.9375rem", fontWeight: 400 }}>
-                    Documentul va aparea aici
-                  </p>
-                </div>
-              )}
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '30px', marginTop: '12px' }}>
+              <button 
+                onClick={addLine}
+                disabled={lines.length >= MAX_LINE_ITEMS}
+                style={{
+                  ...buttonBaseStyle,
+                  flex: 1,
+                  height: '54.5px',
+                  backgroundColor: 'white',
+                  border: '2px solid rgba(0, 187, 167, 1)',
+                  borderRadius: '9999px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  opacity: lines.length >= MAX_LINE_ITEMS ? 0.5 : 1
+                }}
+              >
+                <span style={{ color: 'rgba(54, 65, 83, 1)', fontSize: '15px', fontWeight: 500 }}>Adauga produs</span>
+                <Plus size={18} style={{ color: 'rgba(54, 65, 83, 1)' }} />
+              </button>
+              <button 
+                onClick={() => handleSave(false)}
+                disabled={loading}
+                style={{
+                  ...buttonBaseStyle,
+                  flex: 1,
+                  height: '50.5px',
+                  background: 'linear-gradient(180deg, #00D492 0%, #51A2FF 100%)',
+                  borderRadius: '9999px',
+                  boxShadow: '0px 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: loading ? 0.7 : 1
+                }}
+              >
+                {loading ? (
+                  <Loader2 size={20} className="animate-spin" style={{ color: 'white' }} />
+                ) : (
+                  <span style={{ color: 'white', fontSize: '15px', fontWeight: 500 }}>Salveaza</span>
+                )}
+              </button>
             </div>
           </div>
-        </div>
 
-        {/* Bottom Buttons - Outside cards */}
-        <div className="w-[480px] flex items-center gap-4 mt-2 mb-6">
-          <button
-            type="button"
-            onClick={addLine}
-            className="flex items-center gap-2 px-8 py-3 bg-white border border-teal-500 text-gray-700 rounded-full hover:bg-teal-50 transition-all shadow-sm w-[48%]"
-            style={{ fontSize: "0.9375rem", fontWeight: 500 }}
-          >
-            Adauga produs
-            <Plus size={18} className="ml-auto" />
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSave()}
-            disabled={loading}
-            className="px-12 py-3 bg-[#00BFA5] hover:bg-[#00AC95] text-white rounded-full transition-all shadow-sm disabled:opacity-50 w-[48%]"
-            style={{ fontSize: "0.9375rem", fontWeight: 600 }}
-          >
-            {loading ? "Se salveaza..." : "Salveaza"}
-          </button>
+          {/* Right Side Document Preview */}
+          <div style={{
+            width: '740px',
+            height: '562px',
+            backgroundColor: 'rgba(255, 255, 255, 0.7)',
+            border: '1px solid rgba(229, 231, 235, 0.3)',
+            borderRadius: '16px',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
+            overflow: 'hidden',
+            position: 'relative'
+          }}>
+            {uploadedFiles.length > 0 ? (
+              <>
+                {/* Preview Image/PDF */}
+                {uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? (
+                  <img 
+                    src={uploadedFiles[activePreviewIndex].preview} 
+                    alt="Document preview" 
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
+                  />
+                ) : (
+                  <iframe 
+                    src={uploadedFiles[activePreviewIndex].preview} 
+                    style={{ width: '100%', height: '100%', border: 'none' }}
+                    title="Document preview"
+                  />
+                )}
+                
+                {/* File Navigation */}
+                {uploadedFiles.length > 1 && (
+                  <div style={{ position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '8px', backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: '8px 16px', borderRadius: '9999px', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)' }}>
+                    {uploadedFiles.map((_, idx) => (
+                      <button 
+                        key={idx} 
+                        onClick={() => setActivePreviewIndex(idx)}
+                        style={{ 
+                          ...buttonBaseStyle, 
+                          width: '8px', 
+                          height: '8px', 
+                          borderRadius: '50%', 
+                          backgroundColor: idx === activePreviewIndex ? 'rgba(13, 148, 136, 1)' : 'rgba(209, 213, 220, 1)',
+                          padding: 0
+                        }} 
+                      />
+                    ))}
+                  </div>
+                )}
+                
+                {/* Remove Button */}
+                <button 
+                  onClick={() => removeUploadedFile(activePreviewIndex)}
+                  style={{ ...buttonBaseStyle, position: 'absolute', top: '16px', right: '16px', width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'rgba(255, 255, 255, 0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)' }}
+                >
+                  <X size={16} style={{ color: 'rgba(239, 68, 68, 1)' }} />
+                </button>
+              </>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                <Upload size={48} style={{ color: 'rgba(209, 213, 220, 1)' }} />
+                <span style={{ color: 'rgba(153, 161, 175, 1)', fontSize: '15px', fontWeight: 300 }}>Documentul va aparea aici</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
-    </>
   );
 }

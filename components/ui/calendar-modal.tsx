@@ -115,8 +115,8 @@ export function CalendarModal({ selectedDate, onDateSelect, onClose, minDate, ma
 
           {/* Days Header */}
           <div className="grid grid-cols-7 mb-2 text-center">
-            {daysOfWeek.map((day) => (
-              <div key={day} className="w-10 h-10 flex items-center justify-center text-xs font-medium text-gray-400">
+            {daysOfWeek.map((day, index) => (
+              <div key={index} className="w-10 h-10 flex items-center justify-center text-xs font-medium text-gray-400">
                 {day}
               </div>
             ))}

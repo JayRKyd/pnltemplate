@@ -2,12 +2,164 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Check, Plus, Search, ChevronDown, ChevronLeft, ChevronRight, Calendar, X, Hourglass, ArrowUp, ArrowDown } from "lucide-react";
+import { Check, X, Hourglass } from "lucide-react";
 import { getTeamExpenses, TeamExpense, ExpenseFilters } from "@/app/actions/expenses";
-import { formatAmount } from "@/lib/formatters";
 
-type StatusType = 'Final' | 'Draft' | 'Recurent' | 'draft' | 'pending' | 'approved' | 'rejected' | 'paid';
-type TabType = 'cheltuieli' | 'recurente';
+type TabType = 'Cheltuieli' | 'Recurente';
+
+// Mock data matching the Figma exactly
+const mockTableData = [
+  {
+    status: 'Final' as const,
+    date: '15.mar.25',
+    type: 'Factura',
+    provider: 'Expert Conta SRL',
+    description: 'Servicii contabilitate - Trimestrul 1',
+    amount: '1.270',
+    decimals: '00',
+    paid: false,
+  },
+  {
+    status: 'Draft' as const,
+    date: '20.nov.25',
+    type: 'Factura',
+    provider: 'OpenAI OpCo LLC',
+    description: 'API Credits - ChatGPT & GPT-4',
+    amount: '320',
+    decimals: '00',
+    paid: true,
+  },
+  {
+    status: 'Final' as const,
+    date: '18.nov.25',
+    type: 'Factura',
+    provider: 'IKEA Business Romania',
+    description: 'Mobilier birou - 4 birouri ergonomice',
+    amount: '4.899',
+    decimals: '00',
+    paid: false,
+  },
+  {
+    status: 'Recurent' as const,
+    date: '05.oct.25',
+    type: 'Factura',
+    provider: 'Construct & Renovate SRL',
+    description: 'Renovare spatiu lucru - Etaj 1',
+    amount: '27.000',
+    decimals: '00',
+    paid: true,
+  },
+  {
+    status: 'Final' as const,
+    date: '25.nov.25',
+    type: 'Factura',
+    provider: 'Adobe Systems Software',
+    description: 'Creative Cloud All Apps - 15 users',
+    amount: '1.259',
+    decimals: '00',
+    paid: false,
+  },
+  {
+    status: 'Draft' as const,
+    date: '22.nov.25',
+    type: 'Bon',
+    provider: 'Trattoria Il Calcio',
+    description: 'Team building lunch - 22 persoane',
+    amount: '1.450',
+    decimals: '00',
+    paid: true,
+  },
+  {
+    status: 'Final' as const,
+    date: '18.oct.25',
+    type: 'Factura',
+    provider: 'Office Depot Romania',
+    description: 'Materiale birou & papetarie',
+    amount: '840',
+    decimals: '00',
+    paid: false,
+  },
+  {
+    status: 'Final' as const,
+    date: '12.oct.25',
+    type: 'Factura',
+    provider: 'Google Ireland Limited',
+    description: 'Google Workspace Business - 50 users',
+    amount: '3.850',
+    decimals: '00',
+    paid: true,
+  },
+  {
+    status: 'Recurent' as const,
+    date: '30.sep.25',
+    type: 'Factura',
+    provider: 'Fan Courier SA',
+    description: 'Servicii curierat septembrie',
+    amount: '678',
+    decimals: '00',
+    paid: false,
+  },
+  {
+    status: 'Final' as const,
+    date: '15.sep.25',
+    type: 'Bon',
+    provider: 'Starbucks Romania',
+    description: 'Intalniri cu clienti & catering',
+    amount: '445',
+    decimals: '00',
+    paid: true,
+  },
+  {
+    status: 'Final' as const,
+    date: '28.aug.25',
+    type: 'Factura',
+    provider: 'Zoom Video Communications',
+    description: 'Zoom Business - 20 host licenses',
+    amount: '1.890',
+    decimals: '00',
+    paid: false,
+  },
+  {
+    status: 'Draft' as const,
+    date: '10.aug.25',
+    type: 'Bon',
+    provider: 'OMV Petrom SA',
+    description: 'Combustibil auto - card flotă',
+    amount: '1.520',
+    decimals: '00',
+    paid: true,
+  },
+  {
+    status: 'Final' as const,
+    date: '22.iul.25',
+    type: 'Factura',
+    provider: 'AWS Europe SARL',
+    description: 'Cloud hosting & storage infrastructure',
+    amount: '2.200',
+    decimals: '00',
+    paid: false,
+  },
+  {
+    status: 'Final' as const,
+    date: '05.iul.25',
+    type: 'Chitanta',
+    provider: 'Carrefour Romania SA',
+    description: 'Materiale prezentari & conferinte',
+    amount: '585',
+    decimals: '00',
+    paid: true,
+  },
+  {
+    status: 'Final' as const,
+    date: '18.iun.25',
+    type: 'Factura',
+    provider: 'Slack Technologies LLC',
+    description: 'Slack Business+ - 45 users',
+    amount: '1.750',
+    decimals: '00',
+    paid: false,
+  },
+];
 
 // Mock data for recurring expenses
 const mockRecurringExpenses = [
@@ -48,292 +200,67 @@ const mockRecurringExpenses = [
   },
 ];
 
-interface FilterDropdownProps {
-  label: string;
-  icon?: React.ReactNode;
-  options?: { value: string; label: string }[];
-  value?: string;
-  onChange?: (value: string) => void;
-}
-
-function FilterDropdown({ label, icon, options, value, onChange }: FilterDropdownProps) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  if (options && onChange) {
-    return (
-      <div className="relative">
-        <button 
-          onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors bg-white"
-        >
-          {icon}
-          <span>{value ? options.find(o => o.value === value)?.label || label : label}</span>
-          <ChevronDown size={16} className={`text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-        </button>
-        {isOpen && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-            <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50">
-              {options.map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => {
-                    onChange(value === opt.value ? '' : opt.value);
-                    setIsOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors ${
-                    value === opt.value ? 'text-[#11C6B6]' : 'text-gray-700'
-                  }`}
-                >
-                  <span>{opt.label}</span>
-                  {value === opt.value && (
-                    <Check size={16} className="text-[#11C6B6]" />
-                  )}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    );
+const getStatusStyles = (status: string) => {
+  switch (status) {
+    case 'Final':
+      return {
+        background: 'linear-gradient(180deg, rgba(192, 245, 229, 1.00) 0%, rgba(122, 231, 201, 1.00) 100%)',
+        borderColor: 'rgba(164, 244, 207, 0.3)'
+      };
+    case 'Draft':
+      return {
+        background: 'linear-gradient(180deg, rgba(255, 247, 196, 1.00) 0%, rgba(255, 209, 111, 1.00) 100%)',
+        borderColor: 'rgba(255, 240, 133, 0.3)'
+      };
+    case 'Recurent':
+      return {
+        background: 'linear-gradient(180deg, rgba(255, 224, 238, 1.00) 0%, rgba(255, 179, 217, 1.00) 100%)',
+        borderColor: 'rgba(252, 206, 232, 0.3)'
+      };
+    default:
+      return {
+        background: 'linear-gradient(180deg, rgba(192, 245, 229, 1.00) 0%, rgba(122, 231, 201, 1.00) 100%)',
+        borderColor: 'rgba(164, 244, 207, 0.3)'
+      };
   }
-
-  return (
-    <button className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors bg-white">
-      {icon}
-      <span>{label}</span>
-      <ChevronDown size={16} className="text-gray-400" />
-    </button>
-  );
-}
-
-// Date Range Picker Modal
-interface DateRangePickerProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onApply: (startDate: Date | null, endDate: Date | null) => void;
-  startDate: Date | null;
-  endDate: Date | null;
-}
-
-function DateRangePicker({ isOpen, onClose, onApply, startDate: initialStart, endDate: initialEnd }: DateRangePickerProps) {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [startDate, setStartDate] = useState<Date | null>(initialStart);
-  const [endDate, setEndDate] = useState<Date | null>(initialEnd);
-  const [selectingStart, setSelectingStart] = useState(true);
-
-  if (!isOpen) return null;
-
-  const monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ];
-
-  const getDaysInMonth = (date: Date) => {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const daysInMonth = lastDay.getDate();
-    const startingDay = firstDay.getDay();
-    return { daysInMonth, startingDay };
-  };
-
-  const { daysInMonth, startingDay } = getDaysInMonth(currentMonth);
-
-  const prevMonth = () => {
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
-  };
-
-  const nextMonth = () => {
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
-  };
-
-  const handleDayClick = (day: number) => {
-    const selectedDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
-    
-    if (selectingStart) {
-      setStartDate(selectedDate);
-      setEndDate(null);
-      setSelectingStart(false);
-    } else {
-      if (startDate && selectedDate < startDate) {
-        setStartDate(selectedDate);
-        setEndDate(null);
-      } else {
-        setEndDate(selectedDate);
-        setSelectingStart(true);
-      }
-    }
-  };
-
-  const isInRange = (day: number) => {
-    if (!startDate || !endDate) return false;
-    const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
-    return date > startDate && date < endDate;
-  };
-
-  const isSelected = (day: number) => {
-    const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
-    if (startDate && date.toDateString() === startDate.toDateString()) return true;
-    if (endDate && date.toDateString() === endDate.toDateString()) return true;
-    return false;
-  };
-
-  const handleClear = () => {
-    setStartDate(null);
-    setEndDate(null);
-    setSelectingStart(true);
-  };
-
-  const handleApply = () => {
-    onApply(startDate, endDate);
-    onClose();
-  };
-
-  const days = [];
-  for (let i = 0; i < startingDay; i++) {
-    days.push(<div key={`empty-${i}`} className="w-9 h-9" />);
-  }
-  for (let day = 1; day <= daysInMonth; day++) {
-    const selected = isSelected(day);
-    const inRange = isInRange(day);
-    days.push(
-      <button
-        key={day}
-        onClick={() => handleDayClick(day)}
-        className={`w-9 h-9 rounded-full text-sm font-medium transition-colors ${
-          selected
-            ? 'bg-[#11C6B6] text-white'
-            : inRange
-            ? 'bg-[#D1FAE5] text-gray-700'
-            : 'text-gray-700 hover:bg-gray-100'
-        }`}
-      >
-        {day}
-      </button>
-    );
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      
-      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-[340px] mx-4">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-900">Select Date Range</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
-            <X size={20} className="text-gray-400" />
-          </button>
-        </div>
-
-        {/* Month Navigation */}
-        <div className="flex items-center justify-between px-6 py-4">
-          <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-            <ChevronLeft size={20} className="text-gray-600" />
-          </button>
-          <span className="text-base font-medium text-gray-900">
-            {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
-          </span>
-          <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-            <ChevronRight size={20} className="text-gray-600" />
-          </button>
-        </div>
-
-        {/* Calendar Grid */}
-        <div className="px-6 pb-4">
-          {/* Day Headers */}
-          <div className="grid grid-cols-7 gap-1 mb-2">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-              <div key={day} className="w-9 h-9 flex items-center justify-center text-xs font-medium text-gray-400">
-                {day}
-              </div>
-            ))}
-          </div>
-          
-          {/* Days */}
-          <div className="grid grid-cols-7 gap-1">
-            {days}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
-          <span className="text-sm text-gray-500">
-            {selectingStart ? 'Select start date' : 'Select end date'}
-          </span>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleClear}
-              className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              Clear
-            </button>
-            <button
-              onClick={handleApply}
-              className="px-5 py-2 bg-[#11C6B6] hover:bg-[#0FB2A3] text-white text-sm font-medium rounded-full transition-colors"
-            >
-              Apply
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const normalizedStatus = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
-  
-  const styles: Record<string, string> = {
-    Final: 'bg-[#BEF2E5] text-[#00695C]',
-    Draft: 'bg-[#FDE68A] text-[#92400E]',
-    Recurent: 'bg-[#FBCFE8] text-[#9D174D]',
-    Pending: 'bg-[#FEF3C7] text-[#92400E]',
-    Approved: 'bg-[#BEF2E5] text-[#00695C]',
-    Rejected: 'bg-[#FEE2E2] text-[#991B1B]',
-    Paid: 'bg-[#DBEAFE] text-[#1E40AF]',
-  };
-
-  const displayStatus = normalizedStatus === 'Approved' ? 'Final' : normalizedStatus;
-
-  return (
-    <span className={`inline-flex px-3 py-1 rounded-full text-xs font-medium ${styles[normalizedStatus] || styles.Draft}`}>
-      {displayStatus}
-    </span>
-  );
-}
+};
 
 function PaymentIcon({ paid }: { paid: boolean }) {
   if (paid) {
     return (
-      <div className="w-7 h-7 rounded-full bg-[#D1FAE5] flex items-center justify-center border border-[#A7F3D0]">
-        <Check size={14} className="text-[#059669]" />
+      <div 
+        style={{
+          width: '24px',
+          height: '24px',
+          borderRadius: '50%',
+          backgroundColor: '#D1FAE5',
+          border: '1px solid #A7F3D0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer'
+        }}
+      >
+        <Check size={12} style={{ color: '#059669' }} />
       </div>
     );
   }
   return (
-    <div className="w-7 h-7 rounded-full bg-[#FCE7F3] flex items-center justify-center border border-[#FBCFE8]">
-      <Hourglass size={14} className="text-[#BE185D]" />
+    <div 
+      style={{
+        width: '24px',
+        height: '24px',
+        borderRadius: '50%',
+        backgroundColor: '#FCE7F3',
+        border: '1px solid #FBCFE8',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer'
+      }}
+    >
+      <X size={12} style={{ color: '#BE185D' }} />
     </div>
-  );
-}
-
-// Sort Icon Component
-function SortIcon({ active, direction }: { active: boolean; direction: 'asc' | 'desc' }) {
-  if (!active) {
-    return (
-      <div className="flex flex-col ml-1">
-        <ArrowUp size={10} className="text-gray-300 -mb-0.5" />
-        <ArrowDown size={10} className="text-gray-300" />
-      </div>
-    );
-  }
-  return direction === 'asc' ? (
-    <ArrowUp size={12} className="text-[#11C6B6] ml-1" />
-  ) : (
-    <ArrowDown size={12} className="text-[#11C6B6] ml-1" />
   );
 }
 
@@ -358,56 +285,100 @@ interface PaymentStatusModalProps {
   onClose: () => void;
   onConfirm: () => void;
   supplierName: string;
-  amount: number;
+  amount: string;
   currentlyPaid: boolean;
 }
 
 function PaymentStatusModal({ isOpen, onClose, onConfirm, supplierName, amount, currentlyPaid }: PaymentStatusModalProps) {
   if (!isOpen) return null;
 
-  const formatDisplayAmount = (amt: number) => {
-    return amt.toLocaleString('ro-RO', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).replace('.', ',');
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 200,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }}>
       <div 
-        className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.3)',
+          backdropFilter: 'blur(4px)'
+        }}
         onClick={onClose}
       />
       
-      {/* Modal */}
-      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-[480px] mx-4 p-8">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">
+      <div style={{
+        position: 'relative',
+        backgroundColor: 'white',
+        borderRadius: '16px',
+        boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)',
+        width: '100%',
+        maxWidth: '480px',
+        margin: '16px',
+        padding: '32px'
+      }}>
+        <h2 style={{
+          fontSize: '20px',
+          fontWeight: 600,
+          color: 'rgba(16, 24, 40, 1)',
+          marginBottom: '16px'
+        }}>
           Confirmă schimbarea statusului
         </h2>
         
-        <p className="text-gray-600 mb-2">
+        <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '8px' }}>
           Ești sigur că vrei să schimbi statusul de plată pentru:
         </p>
         
-        <p className="text-gray-900 font-semibold mb-4">
-          {supplierName} - {formatDisplayAmount(amount)}
+        <p style={{
+          color: 'rgba(16, 24, 40, 1)',
+          fontWeight: 600,
+          marginBottom: '16px'
+        }}>
+          {supplierName} - {amount} Lei
         </p>
         
-        <p className="text-gray-500 text-sm mb-8">
+        <p style={{
+          color: 'rgba(107, 114, 128, 1)',
+          fontSize: '14px',
+          marginBottom: '32px'
+        }}>
           Statusul va fi schimbat din &ldquo;{currentlyPaid ? 'Plătit' : 'Neplătit'}&rdquo; în &ldquo;{currentlyPaid ? 'Neplătit' : 'Plătit'}&rdquo;.
         </p>
 
-        <div className="flex gap-3">
+        <div style={{ display: 'flex', gap: '12px' }}>
           <button
             onClick={onClose}
-            className="flex-1 px-6 py-3 border border-gray-200 rounded-full text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+            style={{
+              flex: 1,
+              padding: '12px 24px',
+              border: '1px solid rgba(229, 231, 235, 1)',
+              borderRadius: '9999px',
+              color: 'rgba(55, 65, 81, 1)',
+              fontWeight: 500,
+              backgroundColor: 'white',
+              cursor: 'pointer'
+            }}
           >
             Anulează
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 px-6 py-3 bg-gradient-to-r from-[#11C6B6] to-[#0E9F92] text-white rounded-full font-medium hover:from-[#0FB2A3] hover:to-[#0D9285] transition-all shadow-sm"
+            style={{
+              flex: 1,
+              padding: '12px 24px',
+              background: 'linear-gradient(180deg, rgba(0, 212, 146, 1.00) 0%, rgba(81, 162, 255, 1.00) 100%)',
+              color: 'white',
+              borderRadius: '9999px',
+              fontWeight: 500,
+              border: 'none',
+              cursor: 'pointer',
+              boxShadow: '0px 10px 15px -3px rgba(0, 0, 0, 0.1)'
+            }}
           >
             Confirmă
           </button>
@@ -417,100 +388,24 @@ function PaymentStatusModal({ isOpen, onClose, onConfirm, supplierName, amount, 
   );
 }
 
-const STATUS_OPTIONS = [
-  { value: "", label: "Toate" },
-  { value: "draft", label: "Draft" },
-  { value: "pending", label: "In asteptare" },
-  { value: "approved", label: "Aprobat" },
-  { value: "rejected", label: "Respins" },
-  { value: "paid", label: "Platit" },
-];
-
-const CATEGORY_OPTIONS = [
-  { value: "echipa", label: "Echipa" },
-  { value: "marketing", label: "Marketing" },
-  { value: "it", label: "IT" },
-  { value: "sediu", label: "Sediu" },
-  { value: "servicii", label: "Servicii" },
-  { value: "altele", label: "Altele" },
-];
-
-const CONT_OPTIONS = [
-  { value: "salarii", label: "Salarii" },
-  { value: "bonusuri", label: "Bonusuri" },
-  { value: "training", label: "Training" },
-  { value: "team-events", label: "Team events" },
-];
-
 export default function ExpensesPage() {
   const params = useParams<{ teamId: string }>();
   const router = useRouter();
   const [expenses, setExpenses] = useState<TeamExpense[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabType>('cheltuieli');
+  const [activeSubTab, setActiveSubTab] = useState<TabType>('Cheltuieli');
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchValue, setSearchValue] = useState('');
   const [paymentModalData, setPaymentModalData] = useState<{
     isOpen: boolean;
-    expenseId: string;
+    index: number;
     supplierName: string;
-    amount: number;
+    amount: string;
     currentlyPaid: boolean;
   } | null>(null);
+  
   const itemsPerPage = 15;
-
-  // Filters
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("");
-  const [contFilter, setContFilter] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
-  const [selectedStartDate, setSelectedStartDate] = useState<Date | null>(null);
-  const [selectedEndDate, setSelectedEndDate] = useState<Date | null>(null);
-
-  // Sorting state
-  type SortColumn = 'status' | 'expense_date' | 'doc_type' | 'supplier' | 'description' | 'amount' | 'payment_status';
-  type SortDirection = 'asc' | 'desc';
-  const [sortColumn, setSortColumn] = useState<SortColumn>('expense_date');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-
-  const handleSort = (column: SortColumn) => {
-    if (sortColumn === column) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortColumn(column);
-      setSortDirection('asc');
-    }
-  };
-
-  const handleDateApply = (startDate: Date | null, endDate: Date | null) => {
-    setSelectedStartDate(startDate);
-    setSelectedEndDate(endDate);
-    if (startDate) {
-      setDateFrom(startDate.toISOString().split('T')[0]);
-    } else {
-      setDateFrom("");
-    }
-    if (endDate) {
-      setDateTo(endDate.toISOString().split('T')[0]);
-    } else {
-      setDateTo("");
-    }
-  };
-
-  const formatDateDisplay = () => {
-    if (selectedStartDate && selectedEndDate) {
-      const formatDate = (d: Date) => `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getFullYear()).slice(-2)}`;
-      return `${formatDate(selectedStartDate)} - ${formatDate(selectedEndDate)}`;
-    }
-    if (selectedStartDate) {
-      const formatDate = (d: Date) => `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getFullYear()).slice(-2)}`;
-      return formatDate(selectedStartDate);
-    }
-    return "Data";
-  };
+  const totalItems = 100; // Mock total
 
   const loadExpenses = useCallback(async () => {
     if (!params.teamId) return;
@@ -518,34 +413,37 @@ export default function ExpensesPage() {
     setLoading(true);
     try {
       const filters: ExpenseFilters = {};
-      if (search) filters.search = search;
-      if (statusFilter) filters.status = statusFilter;
-      if (dateFrom) filters.dateFrom = dateFrom;
-      if (dateTo) filters.dateTo = dateTo;
+      if (searchValue) filters.search = searchValue;
 
       const data = await getTeamExpenses(params.teamId, filters);
       setExpenses(data);
-      setError(null);
     } catch (err) {
       console.error("Failed to fetch expenses:", err);
-      setError("Failed to load expenses");
     } finally {
       setLoading(false);
     }
-  }, [params.teamId, search, statusFilter, dateFrom, dateTo]);
+  }, [params.teamId, searchValue]);
 
   useEffect(() => {
     loadExpenses();
   }, [loadExpenses]);
 
-  const formatDisplayAmount = (amount: number) => {
-    return amount.toLocaleString('ro-RO', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).replace('.', ',');
-  };
+  // Use real data if available, otherwise fall back to mock
+  const displayData = expenses.length > 0 
+    ? expenses.map(exp => ({
+        status: (exp.status === 'approved' ? 'Final' : exp.status === 'draft' ? 'Draft' : 'Final') as 'Final' | 'Draft' | 'Recurent',
+        date: formatExpenseDate(exp.expense_date),
+        type: exp.doc_type || 'Factura',
+        provider: exp.supplier || '-',
+        description: exp.description || '-',
+        amount: formatAmountMain(exp.amount || 0),
+        decimals: formatAmountDecimals(exp.amount || 0),
+        paid: exp.status === 'paid',
+        id: exp.id
+      }))
+    : mockTableData;
 
-  const formatDate = (dateStr: string) => {
+  function formatExpenseDate(dateStr: string | null): string {
     if (!dateStr) return '-';
     const date = new Date(dateStr);
     const months = ['ian', 'feb', 'mar', 'apr', 'mai', 'iun', 'iul', 'aug', 'sep', 'oct', 'nov', 'dec'];
@@ -553,87 +451,42 @@ export default function ExpensesPage() {
     const month = months[date.getMonth()];
     const year = date.getFullYear().toString().slice(-2);
     return `${day}.${month}.${year}`;
-  };
+  }
 
-  // Sort expenses
-  const sortedExpenses = [...expenses].sort((a, b) => {
-    let aValue: string | number | null = null;
-    let bValue: string | number | null = null;
+  function formatAmountMain(amount: number): string {
+    const whole = Math.floor(amount);
+    return whole.toLocaleString('ro-RO');
+  }
 
-    switch (sortColumn) {
-      case 'status':
-        aValue = a.status || '';
-        bValue = b.status || '';
-        break;
-      case 'expense_date':
-        aValue = a.expense_date || '';
-        bValue = b.expense_date || '';
-        break;
-      case 'doc_type':
-        aValue = a.doc_type || '';
-        bValue = b.doc_type || '';
-        break;
-      case 'supplier':
-        aValue = a.supplier || '';
-        bValue = b.supplier || '';
-        break;
-      case 'description':
-        aValue = a.description || '';
-        bValue = b.description || '';
-        break;
-      case 'amount':
-        aValue = a.amount || 0;
-        bValue = b.amount || 0;
-        break;
-      case 'payment_status':
-        aValue = a.payment_status || '';
-        bValue = b.payment_status || '';
-        break;
-    }
+  function formatAmountDecimals(amount: number): string {
+    const decimals = Math.round((amount % 1) * 100);
+    return decimals.toString().padStart(2, '0');
+  }
 
-    if (aValue === null || bValue === null) return 0;
-    
-    if (typeof aValue === 'number' && typeof bValue === 'number') {
-      return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
-    }
-    
-    const comparison = String(aValue).localeCompare(String(bValue));
-    return sortDirection === 'asc' ? comparison : -comparison;
-  });
-
-  const totalItems = sortedExpenses.length;
-  const totalPages = Math.ceil(totalItems / itemsPerPage);
-  const paginatedExpenses = sortedExpenses.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-
-  // Generate page numbers to display
-  const getPageNumbers = () => {
-    const pages: number[] = [];
-    const maxVisible = 5;
-    let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-    let end = Math.min(totalPages, start + maxVisible - 1);
-    
-    if (end - start + 1 < maxVisible) {
-      start = Math.max(1, end - maxVisible + 1);
-    }
-    
-    for (let i = start; i <= end; i++) {
-      pages.push(i);
-    }
-    return pages;
+  const formatDisplayAmount = (amt: number) => {
+    return amt.toLocaleString('ro-RO', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).replace('.', ',');
   };
 
   return (
-    <div className="p-6 md:p-8 space-y-6 bg-gray-50/30 min-h-screen">
+    <div style={{
+      width: '100%',
+      minHeight: '100vh',
+      backgroundColor: 'rgba(248, 248, 248, 1)',
+      fontFamily: '"Inter", sans-serif',
+      position: 'relative',
+      overflowX: 'hidden'
+    }}>
       {/* Payment Status Confirmation Modal */}
       {paymentModalData && (
         <PaymentStatusModal
           isOpen={paymentModalData.isOpen}
           onClose={() => setPaymentModalData(null)}
           onConfirm={() => {
-            // TODO: Update payment status in database
-            console.log('Toggling payment status for expense:', paymentModalData.expenseId);
+            console.log('Toggling payment status for expense:', paymentModalData.index);
             setPaymentModalData(null);
-            // Reload expenses to reflect change
             loadExpenses();
           }}
           supplierName={paymentModalData.supplierName}
@@ -642,390 +495,554 @@ export default function ExpensesPage() {
         />
       )}
 
-      {/* Date Range Picker Modal */}
-      <DateRangePicker
-        isOpen={datePickerOpen}
-        onClose={() => setDatePickerOpen(false)}
-        onApply={handleDateApply}
-        startDate={selectedStartDate}
-        endDate={selectedEndDate}
-      />
-
-      {/* Top Section - Tabs & New Button */}
-      <div className="flex items-center justify-between">
-        {/* Tab Switcher */}
-        <div className="flex items-center bg-gray-100 rounded-full p-1">
-          <button
-            onClick={() => setActiveTab('cheltuieli')}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-medium transition-all ${
-              activeTab === 'cheltuieli'
-                ? 'bg-[#11C6B6] text-white shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {activeTab === 'cheltuieli' && <Check size={16} />}
-            Cheltuieli
-          </button>
-          <button
-            onClick={() => setActiveTab('recurente')}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-medium transition-all ${
-              activeTab === 'recurente'
-                ? 'bg-[#11C6B6] text-white shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {activeTab === 'recurente' && <Check size={16} />}
-            Recurente
-          </button>
-        </div>
-
-        {/* New Button */}
-        <button 
-          onClick={() => {
-            if (activeTab === 'cheltuieli') {
-              router.push(`/dashboard/${params.teamId}/expenses/new`);
-            } else {
-              router.push(`/dashboard/${params.teamId}/expenses/recurring/new`);
-            }
-          }}
-          className="flex items-center gap-2 px-5 py-2.5 bg-[#11C6B6] hover:bg-[#0FB2A3] text-white font-medium rounded-full transition-colors shadow-sm"
-        >
-          {activeTab === 'cheltuieli' ? 'Decont Nou' : 'Recurent Nou'}
-          <Plus size={18} />
-        </button>
-      </div>
-
-      {/* Filters Row */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3 flex-wrap">
-          <FilterDropdown 
-            label="Categorie" 
-            options={CATEGORY_OPTIONS}
-            value={categoryFilter}
-            onChange={setCategoryFilter}
-          />
-          <FilterDropdown 
-            label="Cont" 
-            options={CONT_OPTIONS}
-            value={contFilter}
-            onChange={setContFilter}
-          />
-          <button 
-            onClick={() => setDatePickerOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors bg-white"
-          >
-            <Calendar size={16} className="text-gray-400" />
-            <span>{formatDateDisplay()}</span>
-          </button>
-          {activeTab === 'cheltuieli' && (
-            <>
-              <FilterDropdown 
-                label="Status" 
-                options={STATUS_OPTIONS}
-                value={statusFilter}
-                onChange={setStatusFilter}
-              />
-              <FilterDropdown label="Plata" />
-            </>
-          )}
-        </div>
-
-        {/* Search Input */}
-            <div className="relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-            placeholder={activeTab === 'cheltuieli' ? "Furnizor, coleg sau tag" : "Cauta dupa companie sau coleg"}
-            className="w-72 pl-11 pr-4 py-2.5 rounded-full border border-gray-200 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-white"
-              />
-            </div>
-          </div>
-
-      {error && (
-        <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
-          {error}
-          </div>
-      )}
-
-      {/* Cheltuieli Table */}
-      {activeTab === 'cheltuieli' && (
-        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
-        {loading ? (
-            <div className="p-12 text-center text-gray-500">Se incarca...</div>
-          ) : paginatedExpenses.length === 0 ? (
-            <div className="p-12 text-center">
-              <p className="text-gray-500 mb-4">Nu exista cheltuieli</p>
-            <button
-              onClick={() => router.push(`/dashboard/${params.teamId}/expenses/new`)}
-                className="text-teal-600 hover:underline font-medium"
+      {/* Main Content Wrapper */}
+      <div style={{
+        padding: '24px 128px 40px 128px',
+        maxWidth: '1728px',
+        margin: '0 auto'
+      }}>
+        
+        {/* Sub-navigation & CTA */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '24px'
+        }}>
+          <div style={{
+            display: 'flex',
+            padding: '6px',
+            backgroundColor: 'rgba(255, 255, 255, 0.7)',
+            border: '1px solid rgba(229, 231, 235, 0.5)',
+            borderRadius: '9999px',
+            boxShadow: '0px 4px 6px -4px rgba(0, 0, 0, 0.07)'
+          }}>
+            <button 
+              onClick={() => setActiveSubTab('Cheltuieli')} 
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '0 28px',
+                height: '44px',
+                border: 'none',
+                borderRadius: '9999px',
+                cursor: 'pointer',
+                backgroundColor: activeSubTab === 'Cheltuieli' ? 'rgba(30, 172, 200, 1)' : 'transparent',
+                color: activeSubTab === 'Cheltuieli' ? 'white' : 'rgba(106, 114, 130, 1)',
+                fontWeight: 600,
+                fontSize: '16px'
+              }}
             >
-                Creeaza prima cheltuiala
+              {activeSubTab === 'Cheltuieli' && (
+                <div style={{
+                  width: '22px',
+                  height: '22px',
+                  backgroundColor: 'white',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Check size={12} style={{ color: 'rgba(30, 172, 200, 1)' }} />
+                </div>
+              )}
+              Cheltuieli
+            </button>
+            <button 
+              onClick={() => setActiveSubTab('Recurente')} 
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '9px',
+                padding: '0 24px',
+                height: '44px',
+                border: 'none',
+                backgroundColor: activeSubTab === 'Recurente' ? 'rgba(30, 172, 200, 1)' : 'transparent',
+                borderRadius: '9999px',
+                cursor: 'pointer',
+                color: activeSubTab === 'Recurente' ? 'white' : 'rgba(106, 114, 130, 1)',
+                fontWeight: 600,
+                fontSize: '16px'
+              }}
+            >
+              {activeSubTab === 'Recurente' && (
+                <div style={{
+                  width: '22px',
+                  height: '22px',
+                  backgroundColor: 'white',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Check size={12} style={{ color: 'rgba(30, 172, 200, 1)' }} />
+                </div>
+              )}
+              Recurente
             </button>
           </div>
-        ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-100" style={{ backgroundColor: '#D1FAE5' }}>
-                  <th 
-                    onClick={() => handleSort('status')}
-                    className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-[#A7F3D0]/30 transition-colors"
-                  >
-                    <div className="flex items-center">
-                      Status
-                      <SortIcon active={sortColumn === 'status'} direction={sortDirection} />
-                    </div>
-                  </th>
-                  <th 
-                    onClick={() => handleSort('expense_date')}
-                    className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-[#A7F3D0]/30 transition-colors"
-                  >
-                    <div className="flex items-center">
-                      Data
-                      <SortIcon active={sortColumn === 'expense_date'} direction={sortDirection} />
-                    </div>
-                  </th>
-                  <th 
-                    onClick={() => handleSort('doc_type')}
-                    className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-[#A7F3D0]/30 transition-colors"
-                  >
-                    <div className="flex items-center">
-                      Tip
-                      <SortIcon active={sortColumn === 'doc_type'} direction={sortDirection} />
-                    </div>
-                  </th>
-                  <th 
-                    onClick={() => handleSort('supplier')}
-                    className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-[#A7F3D0]/30 transition-colors"
-                  >
-                    <div className="flex items-center">
-                      Furnizor
-                      <SortIcon active={sortColumn === 'supplier'} direction={sortDirection} />
-                    </div>
-                  </th>
-                  <th 
-                    onClick={() => handleSort('description')}
-                    className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-[#A7F3D0]/30 transition-colors"
-                  >
-                    <div className="flex items-center">
-                      Descriere
-                      <SortIcon active={sortColumn === 'description'} direction={sortDirection} />
-                    </div>
-                  </th>
-                  <th 
-                    onClick={() => handleSort('amount')}
-                    className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-[#A7F3D0]/30 transition-colors"
-                  >
-                    <div className="flex flex-col items-end">
-                      <div className="flex items-center">
-                        <span>RON</span>
-                        <SortIcon active={sortColumn === 'amount'} direction={sortDirection} />
-                      </div>
-                    </div>
-                  </th>
-                  <th 
-                    onClick={() => handleSort('payment_status')}
-                    className="px-6 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-[#A7F3D0]/30 transition-colors"
-                  >
-                    <div className="flex items-center justify-center">
-                      Plata
-                      <SortIcon active={sortColumn === 'payment_status'} direction={sortDirection} />
-                    </div>
-                  </th>
-              </tr>
-            </thead>
-              <tbody className="divide-y divide-gray-50">
-                {paginatedExpenses.map((expense) => (
-                <tr
-                    key={expense.id} 
-                    className="hover:bg-gray-50/50 transition-colors cursor-pointer"
-                    onClick={() => router.push(`/dashboard/${params.teamId}/expenses/${expense.id}`)}
-                >
-                    <td className="px-6 py-4">
-                      <StatusBadge status={expense.status} />
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {formatDate(expense.expense_date)}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {expense.doc_type || 'Factura'}
-                  </td>
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                      {expense.supplier || '-'}
-                  </td>
-                    <td className="px-6 py-4 text-sm text-gray-500 max-w-[250px] truncate">
-                      {expense.description || '-'}
-                  </td>
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900 text-right">
-                      {formatDisplayAmount(expense.amount || 0)}
-                  </td>
-                    <td className="px-6 py-4">
-                      <div 
-                        className="flex justify-center"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                          setPaymentModalData({
-                            isOpen: true,
-                            expenseId: expense.id,
-                            supplierName: expense.supplier || 'Unknown',
-                            amount: expense.amount || 0,
-                            currentlyPaid: expense.status === 'paid',
-                          });
-                      }}
+          
+          <button 
+            onClick={() => {
+              if (activeSubTab === 'Cheltuieli') {
+                router.push(`/dashboard/${params.teamId}/expenses/new`);
+              } else {
+                router.push(`/dashboard/${params.teamId}/expenses/recurring/new`);
+              }
+            }}
+            style={{
+              padding: '8px 32px',
+              height: '50px',
+              border: 'none',
+              borderRadius: '9999px',
+              cursor: 'pointer',
+              background: 'linear-gradient(180deg, rgba(0, 212, 146, 1.00) 0%, rgba(81, 162, 255, 1.00) 100%)',
+              color: 'white',
+              fontWeight: 500,
+              fontSize: '16px',
+              boxShadow: '0px 4px 6px -4px rgba(0, 0, 0, 0.1), 0px 10px 15px -3px rgba(0, 0, 0, 0.1)'
+            }}
+          >
+            {activeSubTab === 'Cheltuieli' ? 'Decont Nou +' : 'Recurent Nou +'}
+          </button>
+        </div>
+
+        {/* Filters Bar */}
+        <div style={{
+          display: 'flex',
+          gap: '16px',
+          marginBottom: '24px',
+          alignItems: 'center'
+        }}>
+          {/* Different filters based on active tab */}
+          {(activeSubTab === 'Cheltuieli' 
+            ? ['Categorie', 'Cont', 'Data', 'Status', 'Plata'] 
+            : ['Categorie', 'Cont', 'Data']
+          ).map((filter, idx) => (
+            <button 
+              key={filter} 
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '0 25px',
+                height: '40.5px',
+                backgroundColor: 'rgba(255, 255, 255, 0.7)',
+                border: '1px solid rgba(209, 213, 220, 0.5)',
+                borderRadius: '9999px',
+                cursor: 'pointer',
+                color: 'rgba(153, 161, 175, 1)',
+                fontSize: '15px',
+                boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
+                opacity: activeSubTab === 'Recurente' && filter === 'Cont' ? 0.4 : 1
+              }}
+            >
+              {filter}
+              {filter === 'Data' ? (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="2" y="3" width="12" height="11" rx="2" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.2"/>
+                  <path d="M2 6H14" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.2"/>
+                  <path d="M5 1V4" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.2" strokeLinecap="round"/>
+                  <path d="M11 1V4" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.2" strokeLinecap="round"/>
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M4 6L8 10L12 6" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </button>
+          ))}
+          
+          <div style={{
+            marginLeft: 'auto',
+            position: 'relative',
+            width: activeSubTab === 'Recurente' ? '484px' : '281px'
+          }}>
+            <svg 
+              style={{
+                position: 'absolute',
+                left: '12px',
+                top: '10px',
+                width: '20px',
+                height: '20px'
+              }}
+              viewBox="0 0 20 20" 
+              fill="none" 
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path d="M17.5 17.5L13.875 13.875M15.8333 9.16667C15.8333 12.8486 12.8486 15.8333 9.16667 15.8333C5.48477 15.8333 2.5 12.8486 2.5 9.16667C2.5 5.48477 5.48477 2.5 9.16667 2.5C12.8486 2.5 15.8333 5.48477 15.8333 9.16667Z" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <input 
+              type="text" 
+              placeholder={activeSubTab === 'Cheltuieli' ? 'Furnizor, coleg sau tag' : 'Cauta dupa companie sau coleg'} 
+              value={searchValue} 
+              onChange={e => setSearchValue(e.target.value)} 
+              style={{
+                width: '100%',
+                height: '41px',
+                padding: '0 16px 0 40px',
+                backgroundColor: 'rgba(255, 255, 255, 0.7)',
+                border: '1px solid rgba(209, 213, 220, 0.5)',
+                borderRadius: '9999px',
+                fontSize: '15px',
+                color: 'rgba(16, 24, 40, 1)',
+                boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
+                outline: 'none',
+                fontFamily: '"Inter", sans-serif'
+              }} 
+            />
+          </div>
+        </div>
+
+        {/* Cheltuieli Table */}
+        {activeSubTab === 'Cheltuieli' && (
+          <div style={{
+            backgroundColor: 'rgba(255, 255, 255, 0.7)',
+            border: '1px solid rgba(229, 231, 235, 0.5)',
+            borderRadius: '16px',
+            overflow: 'hidden',
+            boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)'
+          }}>
+            {loading ? (
+              <div style={{ padding: '48px', textAlign: 'center', color: 'rgba(107, 114, 128, 1)' }}>
+                Se incarca...
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{
+                    height: '54px',
+                    background: 'linear-gradient(180deg, rgba(240, 253, 250, 0.80) 0%, rgba(204, 251, 241, 0.80) 100%)',
+                    borderBottom: '1px solid rgba(229, 231, 235, 0.5)'
+                  }}>
+                    {['STATUS', 'DATA', 'TIP', 'FURNIZOR', 'DESCRIERE', 'SUMA fara TVA', 'PLATA'].map((header, i) => (
+                      <th 
+                        key={header} 
+                        style={{
+                          textAlign: i === 0 || i === 5 || i === 6 ? 'center' : 'left',
+                          padding: '0 24px',
+                          fontSize: '15px',
+                          fontWeight: 500,
+                          color: 'rgba(74, 85, 101, 1)',
+                          letterSpacing: '0.75px',
+                          width: i === 0 ? '187px' : i === 1 ? '149px' : i === 2 ? '134px' : i === 3 ? '316px' : i === 4 ? '402px' : i === 5 ? '151px' : '128px'
+                        }}
                       >
-                        <button className="hover:scale-110 transition-transform">
-                          <PaymentIcon paid={expense.status === 'paid'} />
-                    </button>
-                      </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                        {header === 'SUMA fara TVA' ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                            <span>SUMA</span>
+                            <span style={{ fontSize: '15px' }}>fara TVA</span>
+                          </div>
+                        ) : header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayData.map((row, index) => (
+                    <tr 
+                      key={index} 
+                      style={{
+                        height: '49px',
+                        borderBottom: '1px solid rgba(229, 231, 235, 0.3)',
+                        cursor: 'pointer',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(240, 253, 250, 0.3)')}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      onClick={() => {
+                        if ('id' in row && row.id) {
+                          router.push(`/dashboard/${params.teamId}/expenses/${row.id}`);
+                        }
+                      }}
+                    >
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '96px',
+                          height: '32px',
+                          borderRadius: '999px',
+                          border: '1px solid',
+                          fontSize: '12px',
+                          fontWeight: 200,
+                          color: 'rgba(71, 85, 105, 1)',
+                          boxShadow: '0px 4px 10px rgba(0, 0, 0, 0.05)',
+                          ...getStatusStyles(row.status)
+                        }}>
+                          {row.status}
+                        </div>
+                      </td>
+                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(16, 24, 40, 1)' }}>
+                        {row.date}
+                      </td>
+                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(54, 65, 83, 1)' }}>
+                        {row.type}
+                      </td>
+                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(16, 24, 40, 1)' }}>
+                        {row.provider}
+                      </td>
+                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(54, 65, 83, 1)' }}>
+                        {row.description}
+                      </td>
+                      <td style={{ padding: '0 24px', textAlign: 'center' }}>
+                        <span style={{ fontSize: '14px', fontWeight: 400, color: 'rgba(19, 7, 14, 1)' }}>
+                          {row.amount},
+                        </span>
+                        <span style={{ fontSize: '12px', color: 'rgba(19, 7, 14, 1)' }}>
+                          {row.decimals}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <div 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPaymentModalData({
+                              isOpen: true,
+                              index,
+                              supplierName: row.provider,
+                              amount: `${row.amount},${row.decimals}`,
+                              currentlyPaid: row.paid
+                            });
+                          }}
+                          style={{ display: 'flex', justifyContent: 'center' }}
+                        >
+                          <PaymentIcon paid={row.paid} />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         )}
-      </div>
-      )}
 
-      {/* Recurente Table */}
-      {activeTab === 'recurente' && (
-        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-100" style={{ backgroundColor: '#D1FAE5' }}>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Furnizor
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Descriere
-                </th>
-                <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  RON
-                </th>
-                <th className="px-4 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  JUL
-                </th>
-                <th className="px-4 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  AUG
-                </th>
-                <th className="px-4 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  SEP
-                </th>
-                <th className="px-4 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  OCT
-                </th>
-                <th className="px-4 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  NOV
-                </th>
-                <th className="px-4 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  DEC
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {mockRecurringExpenses.map((expense) => (
-                <tr 
-                  key={expense.id} 
-                  className="hover:bg-gray-50/50 transition-colors cursor-pointer"
-                >
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                    {expense.furnizor}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500">
-                    {expense.descriere}
-                  </td>
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900 text-right">
-                    {formatDisplayAmount(expense.suma)}
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex justify-center">
-                      <MonthPaymentIcon paid={expense.payments.jul} />
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex justify-center">
-                      <MonthPaymentIcon paid={expense.payments.aug} />
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex justify-center">
-                      <MonthPaymentIcon paid={expense.payments.sep} />
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex justify-center">
-                      <MonthPaymentIcon paid={expense.payments.oct} />
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex justify-center">
-                      <MonthPaymentIcon paid={expense.payments.nov} />
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex justify-center">
-                      <MonthPaymentIcon paid={expense.payments.dec} />
-                    </div>
-                  </td>
+        {/* Recurente Table */}
+        {activeSubTab === 'Recurente' && (
+          <div style={{
+            backgroundColor: 'rgba(255, 255, 255, 0.7)',
+            border: '1px solid rgba(229, 231, 235, 0.5)',
+            borderRadius: '16px',
+            overflow: 'hidden',
+            boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)'
+          }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{
+                  height: '50.5px',
+                  backgroundColor: 'rgba(44, 173, 189, 0.08)',
+                  borderBottom: '1px solid rgba(229, 231, 235, 0.5)'
+                }}>
+                  <th style={{ 
+                    width: '379.2px',
+                    textAlign: 'left', 
+                    paddingLeft: '24px', 
+                    fontSize: '12px', 
+                    fontWeight: 600, 
+                    color: 'rgba(74, 85, 101, 1)',
+                    letterSpacing: '0.6px'
+                  }}>
+                    FURNIZOR
+                  </th>
+                  <th style={{ 
+                    width: '452px',
+                    textAlign: 'left', 
+                    paddingLeft: '24px', 
+                    fontSize: '12px', 
+                    fontWeight: 600, 
+                    color: 'rgba(74, 85, 101, 1)',
+                    letterSpacing: '0.6px'
+                  }}>
+                    DESCRIERE
+                  </th>
+                  <th style={{ 
+                    width: '162.7px',
+                    textAlign: 'center', 
+                    fontSize: '12px', 
+                    fontWeight: 600, 
+                    color: 'rgba(74, 85, 101, 1)',
+                    letterSpacing: '0.6px'
+                  }}>
+                    RON
+                  </th>
+                  {['JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].map(month => (
+                    <th 
+                      key={month} 
+                      style={{ 
+                        width: '81.8px',
+                        textAlign: 'center', 
+                        fontSize: '12px', 
+                        fontWeight: 600, 
+                        color: 'rgba(74, 85, 101, 1)',
+                        letterSpacing: '0.6px'
+                      }}
+                    >
+                      {month}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {mockRecurringExpenses.map((expense) => {
+                  const amountParts = formatDisplayAmount(expense.suma).split(',');
+                  const mainAmount = amountParts[0] + ',';
+                  const decimals = amountParts[1] || '00';
+                  
+                  return (
+                    <tr 
+                      key={expense.id} 
+                      style={{
+                        height: '65px',
+                        borderBottom: '1px solid rgba(229, 231, 235, 0.3)',
+                        cursor: 'pointer',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(44, 173, 189, 0.02)')}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >
+                      <td style={{ 
+                        width: '379.2px',
+                        paddingLeft: '24px', 
+                        fontSize: '15px', 
+                        fontWeight: 500, 
+                        color: 'rgba(16, 24, 40, 1)' 
+                      }}>
+                        {expense.furnizor}
+                      </td>
+                      <td style={{ 
+                        width: '452px',
+                        paddingLeft: '24px', 
+                        fontSize: '14px', 
+                        fontWeight: 400, 
+                        color: 'rgba(54, 65, 83, 1)' 
+                      }}>
+                        {expense.descriere}
+                      </td>
+                      <td style={{ width: '162.7px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: '1px' }}>
+                          <span style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(10, 10, 10, 1)' }}>
+                            {mainAmount}
+                          </span>
+                          <span style={{ fontSize: '13px', fontWeight: 500, color: 'rgba(10, 10, 10, 1)' }}>
+                            {decimals}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ width: '81.8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <MonthPaymentIcon paid={expense.payments.jul} />
+                        </div>
+                      </td>
+                      <td style={{ width: '81.8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <MonthPaymentIcon paid={expense.payments.aug} />
+                        </div>
+                      </td>
+                      <td style={{ width: '81.8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <MonthPaymentIcon paid={expense.payments.sep} />
+                        </div>
+                      </td>
+                      <td style={{ width: '81.8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <MonthPaymentIcon paid={expense.payments.oct} />
+                        </div>
+                      </td>
+                      <td style={{ width: '81.8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <MonthPaymentIcon paid={expense.payments.nov} />
+                        </div>
+                      </td>
+                      <td style={{ width: '81.8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <MonthPaymentIcon paid={expense.payments.dec} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-      {/* Pagination */}
-      {!loading && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-500">
-            {activeTab === 'cheltuieli' 
-              ? `Showing ${Math.min(itemsPerPage, paginatedExpenses.length)} of ${totalItems} results`
-              : `Showing ${mockRecurringExpenses.length} of ${mockRecurringExpenses.length} results`
-            }
-          </p>
-
-          {((activeTab === 'cheltuieli' && totalPages > 1) || activeTab === 'recurente') && (
-            <div className="flex items-center gap-2">
+        {/* Footer / Pagination */}
+        <div style={{
+          marginTop: '32px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <span style={{ fontSize: '14px', color: 'rgba(0, 0, 0, 1)' }}>
+            Showing {activeSubTab === 'Recurente' ? mockRecurringExpenses.length : displayData.length} of {activeSubTab === 'Recurente' ? mockRecurringExpenses.length : totalItems} results
+          </span>
+          
+          <div style={{ display: 'flex', gap: '7px' }}>
+            <button 
+              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+              style={{
+                width: '56px',
+                height: '36px',
+                backgroundColor: 'white',
+                border: 'none',
+                borderRadius: '28px',
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: currentPage === 1 ? 0.5 : 1
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12.5 15L7.5 10L12.5 5" stroke="rgba(107, 114, 128, 1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+            {[1, 2, 3, 4, 5].map(page => (
               <button 
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage === 1}
-                className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                key={page} 
+                onClick={() => setCurrentPage(page)} 
+                style={{
+                  width: '56px',
+                  height: '36px',
+                  border: 'none',
+                  borderRadius: '28px',
+                  cursor: 'pointer',
+                  backgroundColor: currentPage === page ? 'rgba(34, 211, 238, 1)' : 'rgba(225, 244, 245, 1)',
+                  color: currentPage === page ? 'white' : 'rgba(23, 26, 28, 0.4)',
+                  fontSize: '14px',
+                  fontWeight: 500
+                }}
               >
-                <ChevronLeft size={20} className="text-gray-400" />
+                {page}
               </button>
-
-              {(activeTab === 'cheltuieli' ? getPageNumbers() : [1]).map((page) => (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`w-10 h-10 rounded-full text-sm font-medium transition-colors ${
-                    currentPage === page
-                      ? 'bg-[#11C6B6] text-white'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  {page}
-                </button>
-              ))}
-
-              <button 
-                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                disabled={activeTab === 'recurente' || currentPage === totalPages}
-                className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight size={20} className="text-gray-400" />
-              </button>
-            </div>
-          )}
+            ))}
+            <button 
+              onClick={() => setCurrentPage(Math.min(5, currentPage + 1))}
+              disabled={currentPage === 5}
+              style={{
+                width: '56px',
+                height: '36px',
+                backgroundColor: 'white',
+                border: 'none',
+                borderRadius: '28px',
+                cursor: currentPage === 5 ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: currentPage === 5 ? 0.5 : 1
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M7.5 15L12.5 10L7.5 5" stroke="rgba(107, 114, 128, 1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
-
-
-
-
-
-
-
