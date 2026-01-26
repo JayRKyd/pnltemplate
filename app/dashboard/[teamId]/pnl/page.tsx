@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PLStatement } from "@/testcode/plstatement";
 import { getPnlData, PnlData, updateRevenue } from "@/app/actions/pnl-data";
+import { saveBudgetTemplate } from "@/app/actions/budget-template";
+import { BudgetTemplate } from "@/testcode/budgettemplateform";
 import { Loader2 } from "lucide-react";
 
 export default function PnlPage() {
@@ -50,6 +52,27 @@ export default function PnlPage() {
     }
   };
 
+  // Handle budget template save
+  const handleSaveBudgetTemplate = async (teamId: string, template: BudgetTemplate) => {
+    try {
+      const result = await saveBudgetTemplate(teamId, {
+        year: template.year,
+        venituriCategories: template.venituriCategories.map(c => ({
+          name: c.name,
+          subcategories: c.subcategories.map(s => ({ name: s.name })),
+        })),
+        cheltuieliCategories: template.cheltuieliCategories.map(c => ({
+          name: c.name,
+          subcategories: c.subcategories.map(s => ({ name: s.name })),
+        })),
+      });
+      return result;
+    } catch (err) {
+      console.error("Error saving budget template:", err);
+      return { success: false, error: "Eroare la salvarea template-ului" };
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#F8F9FA] flex items-center justify-center">
@@ -81,6 +104,7 @@ export default function PnlPage() {
         // Pass real data
         realData={pnlData || undefined}
         teamId={params.teamId}
+        onSaveBudgetTemplate={handleSaveBudgetTemplate}
       />
     </div>
   );

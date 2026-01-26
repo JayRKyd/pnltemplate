@@ -1440,26 +1440,31 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
                 {/* Scrollable Preview Area */}
                 <div style={{ 
                   flex: 1, 
-                  overflow: 'auto', 
-                  display: 'flex', 
-                  justifyContent: 'center', 
-                  alignItems: uploadedFiles[activePreviewIndex]?.type.startsWith('image/') && imageZoom > 1 ? 'flex-start' : 'center',
+                  overflow: imageZoom > 1 ? 'scroll' : 'auto', 
+                  position: 'relative',
                   padding: uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? '60px 16px 60px 16px' : '0'
                 }}>
                   {/* Preview Image/PDF */}
                   {uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? (
-                    <img 
-                      src={uploadedFiles[activePreviewIndex].preview} 
-                      alt="Document preview" 
-                      style={{ 
-                        width: imageZoom === 1 ? '100%' : `${imageZoom * 100}%`,
-                        maxWidth: imageZoom === 1 ? '100%' : 'none',
-                        height: 'auto',
-                        objectFit: 'contain',
-                        cursor: imageZoom > 1 ? 'grab' : 'default',
-                        transition: 'width 0.2s ease'
-                      }} 
-                    />
+                    <div style={{
+                      minWidth: imageZoom > 1 ? `${700 * imageZoom}px` : '100%',
+                      minHeight: imageZoom > 1 ? 'auto' : '100%',
+                      display: 'flex',
+                      justifyContent: imageZoom > 1 ? 'flex-start' : 'center',
+                      alignItems: imageZoom > 1 ? 'flex-start' : 'center'
+                    }}>
+                      <img 
+                        src={uploadedFiles[activePreviewIndex].preview} 
+                        alt="Document preview" 
+                        style={{ 
+                          width: imageZoom === 1 ? '100%' : `${700 * imageZoom}px`,
+                          height: 'auto',
+                          objectFit: 'contain',
+                          cursor: imageZoom > 1 ? 'grab' : 'default',
+                          transition: 'width 0.2s ease'
+                        }} 
+                      />
+                    </div>
                   ) : (
                     <iframe 
                       src={uploadedFiles[activePreviewIndex].preview} 

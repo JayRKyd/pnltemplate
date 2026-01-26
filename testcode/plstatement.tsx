@@ -53,6 +53,8 @@ interface PLStatementProps {
   // Real data from database
   realData?: RealPnlData;
   teamId?: string;
+  // Budget template save function
+  onSaveBudgetTemplate?: (teamId: string, template: BudgetTemplate) => Promise<{ success: boolean; error?: string }>;
 }
 
 interface Subcategory {
@@ -101,7 +103,7 @@ const mockInvoices: Invoice[] = [
 ];
 
 export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatementProps>(
-  ({ onBack, venituri, setVenituri, realData, teamId }, ref) => {
+  ({ onBack, venituri, setVenituri, realData, teamId, onSaveBudgetTemplate }, ref) => {
     const [activeTab, setActiveTab] = useState<'expenses' | 'budget' | 'delta'>('expenses');
     const [selectedCurrency, setSelectedCurrency] = useState<'EUR' | 'RON'>('EUR');
     const [selectedYear, setSelectedYear] = useState('2025');
@@ -586,11 +588,27 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
     const displayCheltuieli = activeTab === 'budget' ? budgetCheltuieli : data.cheltuieli;
     const displayCategories = activeTab === 'budget' ? budgetCategories : data.categories;
 
-    const handleSaveBudgetTemplate = (template: BudgetTemplate) => {
+    const handleSaveBudgetTemplate = async (template: BudgetTemplate) => {
+      // Update local state
       setBudgetTemplates({
         ...budgetTemplates,
         [template.year]: template
       });
+      
+      // Save to database if function provided
+      if (onSaveBudgetTemplate && teamId) {
+        try {
+          const result = await onSaveBudgetTemplate(teamId, template);
+          if (result.success) {
+            alert("Template salvat cu succes!");
+          } else {
+            alert("Eroare la salvare: " + (result.error || "Eroare necunoscută"));
+          }
+        } catch (err) {
+          console.error("Error saving budget template:", err);
+          alert("Eroare la salvarea template-ului");
+        }
+      }
     };
 
     return (
