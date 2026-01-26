@@ -83,32 +83,32 @@ interface Invoice {
 }
 
 const mockInvoices: Invoice[] = [
-  // 2.2 Google ads - Aug 2025
-  { id: '1', date: '2025-01-05', supplier: 'AWS Europe SARL', description: 'Cloud hosting infrastructure - Ianuarie', invoiceNumber: 'AWS-2025-001', amount: 1500, status: 'Final', category: '2.2 Google ads', type: 'reale' },
-  { id: '2', date: '2025-01-12', supplier: 'Microsoft Ireland Ltd', description: 'Office 365 Business Premium - 50 licente', invoiceNumber: 'MS-2025-001', amount: 2300, status: 'Final', category: '2.2 Google ads', type: 'reale' },
-  { id: '3', date: '2025-01-20', supplier: 'Adobe Systems Software', description: 'Creative Cloud All Apps - 15 users', invoiceNumber: 'AD-2025-001', amount: 850, status: 'Final', category: '2.2 Google ads', type: 'reale' },
-  { id: '4', date: '2025-01-28', supplier: 'Google Ireland Ltd', description: 'Google Workspace Business Standard', invoiceNumber: 'GO-2025-001', amount: 420, status: 'Final', category: '2.2 Google ads', type: 'recurente' },
-  { id: '5', date: '2025-01-30', supplier: 'Orange Romania SA', description: 'Abonament telefonie - Ianuarie', invoiceNumber: 'OR-2025-001', amount: 890, status: 'Final', category: '2.2 Google ads', type: 'recurente' },
+  // 2.2 Google ads - Jan 2026
+  { id: '1', date: '2026-01-05', supplier: 'AWS Europe SARL', description: 'Cloud hosting infrastructure - Ianuarie', invoiceNumber: 'AWS-2026-001', amount: 1500, status: 'Final', category: '2.2 Google ads', type: 'reale' },
+  { id: '2', date: '2026-01-12', supplier: 'Microsoft Ireland Ltd', description: 'Office 365 Business Premium - 50 licente', invoiceNumber: 'MS-2026-001', amount: 2300, status: 'Final', category: '2.2 Google ads', type: 'reale' },
+  { id: '3', date: '2026-01-20', supplier: 'Adobe Systems Software', description: 'Creative Cloud All Apps - 15 users', invoiceNumber: 'AD-2026-001', amount: 850, status: 'Final', category: '2.2 Google ads', type: 'reale' },
+  { id: '4', date: '2026-01-28', supplier: 'Google Ireland Ltd', description: 'Google Workspace Business Standard', invoiceNumber: 'GO-2026-001', amount: 420, status: 'Final', category: '2.2 Google ads', type: 'recurente' },
+  { id: '5', date: '2026-01-30', supplier: 'Orange Romania SA', description: 'Abonament telefonie - Ianuarie', invoiceNumber: 'OR-2026-001', amount: 890, status: 'Final', category: '2.2 Google ads', type: 'recurente' },
   
   // 1.1 Salarii
-  { id: '11', date: '2025-01-05', supplier: 'Angajati', description: 'Salarii nete - Ianuarie 2025', invoiceNumber: 'SAL-01-25', amount: 28500, status: 'Final', category: '1.1 Salarii', type: 'reale' },
-  { id: '12', date: '2025-01-25', supplier: 'Bugetul de Stat', description: 'Contributii salariale', invoiceNumber: 'TAX-01-25', amount: 12500, status: 'Final', category: '1.1 Salarii', type: 'recurente' },
+  { id: '11', date: '2026-01-05', supplier: 'Angajati', description: 'Salarii nete - Ianuarie 2026', invoiceNumber: 'SAL-01-26', amount: 28500, status: 'Final', category: '1.1 Salarii', type: 'reale' },
+  { id: '12', date: '2026-01-25', supplier: 'Bugetul de Stat', description: 'Contributii salariale', invoiceNumber: 'TAX-01-26', amount: 12500, status: 'Final', category: '1.1 Salarii', type: 'recurente' },
 
   // 4.1 Chirie
-  { id: '21', date: '2025-01-03', supplier: 'Office Building SRL', description: 'Chirie spatiu birouri - Ianuarie', invoiceNumber: 'CH-2025-001', amount: 3500, status: 'Final', category: '4.1 Chirie', type: 'recurente' },
-  { id: '22', date: '2025-01-15', supplier: 'Office Building SRL', description: 'Costuri mentenanta', invoiceNumber: 'MN-2025-001', amount: 270, status: 'Final', category: '4.1 Chirie', type: 'reale' },
+  { id: '21', date: '2026-01-03', supplier: 'Office Building SRL', description: 'Chirie spatiu birouri - Ianuarie', invoiceNumber: 'CH-2026-001', amount: 3500, status: 'Final', category: '4.1 Chirie', type: 'recurente' },
+  { id: '22', date: '2026-01-15', supplier: 'Office Building SRL', description: 'Costuri mentenanta', invoiceNumber: 'MN-2026-001', amount: 270, status: 'Final', category: '4.1 Chirie', type: 'reale' },
 
   // Generic fallback for other categories
-  { id: '6', date: '2025-08-15', supplier: 'Generic Supplier SRL', description: 'Servicii diverse', invoiceNumber: 'GEN-001', amount: 1000, status: 'Final', category: 'General', type: 'reale' },
+  { id: '6', date: '2026-08-15', supplier: 'Generic Supplier SRL', description: 'Servicii diverse', invoiceNumber: 'GEN-001', amount: 1000, status: 'Final', category: 'General', type: 'reale' },
 ];
 
 export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatementProps>(
   ({ onBack, venituri, setVenituri, realData, teamId, onSaveBudgetTemplate }, ref) => {
     const [activeTab, setActiveTab] = useState<'expenses' | 'budget' | 'delta'>('expenses');
     const [selectedCurrency, setSelectedCurrency] = useState<'EUR' | 'RON'>('EUR');
-    const [selectedYear, setSelectedYear] = useState('2025');
-    const [deltaSelectedMonth, setDeltaSelectedMonth] = useState(11); // December (0-indexed)
-    const [deltaSelectedYear, setDeltaSelectedYear] = useState(2025);
+    const [selectedYear, setSelectedYear] = useState('2026');
+    const [deltaSelectedMonth, setDeltaSelectedMonth] = useState(0); // January (0-indexed)
+    const [deltaSelectedYear, setDeltaSelectedYear] = useState(2026);
     const [viewMode, setViewMode] = useState<'monthly' | 'quarterly'>('monthly');
     const [viewType, setViewType] = useState<'lunar' | 'trimestrial' | 'anual'>('lunar');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -144,12 +144,12 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
     const [showInvoicesPopup, setShowInvoicesPopup] = useState<{ category: string, month: string } | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [uploadedBudgets, setUploadedBudgets] = useState<{[year: string]: string}>({
-      '2024': 'Buget_2024.xlsx'
+      '2025': 'Buget_2025.xlsx'
     });
     const [showBudgetTemplateForm, setShowBudgetTemplateForm] = useState(false);
     const [budgetTemplates, setBudgetTemplates] = useState<{[year: string]: BudgetTemplate}>({
-      '2025': {
-        year: '2025',
+      '2026': {
+        year: '2026',
         venituriCategories: [],
         cheltuieliCategories: [
           {
@@ -227,29 +227,29 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
     // Use real data if available, otherwise fall back to mock data
     const hasRealData = realData && realData.categories && realData.categories.length > 0;
     
-    // Mock data structure - 24 months: first 12 for 2024, last 12 for 2025
+    // Mock data structure - 24 months: first 12 for 2025, last 12 for 2026
     const mockData = {
       cheltuieli: [
-        // 2024 data (Jan-Jul not shown in screenshot but needed for structure)
+        // 2025 data (Jan-Jul not shown in screenshot but needed for structure)
         40000, 42000, 48000, 52000, 54000, 58000, 62000, 
-        // Aug-Dec 2024 (Visible in screenshot)
+        // Aug-Dec 2025 (Visible in screenshot)
         55000, 57000, 80000, 54000, 65000,
-        // 2025 data (Jan-Aug visible in screenshot)
+        // 2026 data (Jan-Aug visible in screenshot)
         44225, 44692, 50851, 57335, 59991, 63038, 67785, 58623, 
-        // Sep-Dec 2025 (Future/Not in screenshot)
+        // Sep-Dec 2026 (Future/Not in screenshot)
         60449, 85126, 58228, 70000
       ],
       categories: [
         { 
           name: '1. Echipa', 
           values: [
-            // 2024 (Jan-Jul hidden)
+            // 2025 (Jan-Jul hidden)
             35000, 36000, 42000, 44000, 46000, 48000, 54000, 
-            // Aug-Dec 2024
+            // Aug-Dec 2025
             47000, 45000, 42000, 27000, 38000,
-            // 2025 (Jan-Aug)
+            // 2026 (Jan-Aug)
             37797, 39318, 45365, 48156, 50759, 52224, 59301, 50752,
-            // Sep-Dec 2025
+            // Sep-Dec 2026
             47997, 45761, 29946, 41000
           ],
           subcategories: [
@@ -262,13 +262,13 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         { 
           name: '2. Marketing', 
           values: [
-            // 2024
-            900, 700, 1000, 2400, 2300, 3000, 2000, 
-            // Aug-Dec 2024
-            1300, 750, 750, 0, 1200,
             // 2025
+            900, 700, 1000, 2400, 2300, 3000, 2000, 
+            // Aug-Dec 2025
+            1300, 750, 750, 0, 1200,
+            // 2026
             1001, 761, 1118, 2625, 2485, 3308, 2157, 1379, 
-            // Sep-Dec 2025
+            // Sep-Dec 2026
             790, 790, 0, 1500
           ],
           subcategories: [
@@ -280,13 +280,13 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         { 
           name: '3. IT', 
           values: [
-            // 2024
-            500, 800, 500, 2500, 2300, 3300, 2800, 
-            // Aug-Dec 2024
-            3100, 2900, 3300, 2400, 2800,
             // 2025
+            500, 800, 500, 2500, 2300, 3300, 2800, 
+            // Aug-Dec 2025
+            3100, 2900, 3300, 2400, 2800,
+            // 2026
             533, 872, 526, 2736, 2483, 3574, 2968, 3315, 
-            // Sep-Dec 2025
+            // Sep-Dec 2026
             3037, 3484, 2561, 3100
           ],
           subcategories: [
@@ -297,13 +297,13 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         { 
           name: '4. Sediu', 
           values: [
-            // 2024
-            4500, 3500, 3100, 3300, 3200, 2900, 3000, 
-            // Aug-Dec 2024
-            2900, 3100, 28000, 3900, 4200,
             // 2025
+            4500, 3500, 3100, 3300, 3200, 2900, 3000, 
+            // Aug-Dec 2025
+            2900, 3100, 28000, 3900, 4200,
+            // 2026
             4811, 3741, 3330, 3582, 3465, 3078, 3214, 3096, 
-            // Sep-Dec 2025
+            // Sep-Dec 2026
             3338, 30110, 4197, 4500
           ],
           subcategories: [
@@ -316,13 +316,13 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         { 
           name: '5. Servicii', 
           values: [
-            // 2024
-            80, 0, 320, 35, 500, 380, 50, 
-            // Aug-Dec 2024
-            75, 1350, 1300, 230, 400,
             // 2025
+            80, 0, 320, 35, 500, 380, 50, 
+            // Aug-Dec 2025
+            75, 1350, 1300, 230, 400,
+            // 2026
             83, 0, 342, 40, 545, 408, 53, 81, 
-            // Sep-Dec 2025
+            // Sep-Dec 2026
             1419, 1365, 246, 450
           ],
           subcategories: [
@@ -335,13 +335,13 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         { 
           name: '6. Altele', 
           values: [
-            // 2024
-            0, 0, 160, 180, 240, 420, 85, 
-            // Aug-Dec 2024
-            0, 3600, 3400, 20000, 18000,
             // 2025
+            0, 0, 160, 180, 240, 420, 85, 
+            // Aug-Dec 2025
+            0, 3600, 3400, 20000, 18000,
+            // 2026
             0, 0, 170, 196, 254, 446, 92, 0, 
-            // Sep-Dec 2025
+            // Sep-Dec 2026
             3868, 3616, 21278, 19450
           ],
           subcategories: [
@@ -414,23 +414,23 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
       return data.venituri[index] - data.cheltuieli[index];
     };
 
-    // Get year offset for data (0 for 2024, 12 for 2025)
+    // Get year offset for data (0 for prev year, 12 for current year)
     const getYearOffset = () => {
-      return selectedYear === '2025' ? 12 : 0;
+      return selectedYear === '2026' ? 12 : (selectedYear === '2025' ? 12 : 0);
     };
 
     // Get the data for the current view
     const getYearData = (values: number[]) => {
       if (activeTab === 'budget') {
         // Budget view: Calendar year (Jan-Dec of selected year)
-        // For 2025: Jan 2025 (index 12) -> Dec 2025 (index 23)
-        // For 2024: Jan 2024 (index 0) -> Dec 2024 (index 11)
-        const yearOffset = selectedYear === '2025' ? 12 : 0;
+        // For 2026: Jan 2026 (index 12) -> Dec 2026 (index 23)
+        // For 2025: Jan 2025 (index 0) -> Dec 2025 (index 11) when viewing 2025-2026 data
+        const yearOffset = selectedYear === '2026' ? 12 : 0;
         return values.slice(yearOffset, yearOffset + 12);
       }
       // P&L Realizat view: Rolling fiscal year (Aug-Aug)
       // Always return Aug previous year -> Aug current year (13 months)
-      // For 2025: Aug 2024 (index 7) -> Aug 2025 (index 19)
+      // For 2026: Aug 2025 (index 7) -> Aug 2026 (index 19)
       return values.slice(7, 20);
     };
 
@@ -447,7 +447,8 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
     // Determine if an index is the current month (only for P&L Realizat view)
     const isCurrentMonth = (index: number) => {
       if (activeTab === 'budget') return false; // No current month highlight in budget view
-      return index === 12; // Aug 2025 is the last column in fiscal year view
+      // In fiscal year view (Aug-Aug), Jan 2026 is index 5 (0=Aug, 1=Sep, 2=Oct, 3=Nov, 4=Dec, 5=Jan)
+      return index === 5; // Jan 2026 is the current month
     };
 
     // Get column styles for highlights
@@ -682,7 +683,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                         <CustomSelect
                           value={selectedYear}
                           onChange={setSelectedYear}
-                          options={[{ value: '2025', label: '2025' }, { value: '2024', label: '2024' }]}
+                          options={[{ value: '2026', label: '2026' }, { value: '2025', label: '2025' }, { value: '2024', label: '2024' }]}
                           className="w-24 px-4 py-2 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:border-transparent"
                         />
                         <button
@@ -711,7 +712,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                         <CustomSelect
                           value={selectedYear}
                           onChange={setSelectedYear}
-                          options={[{ value: '2025', label: '2025' }, { value: '2024', label: '2024' }]}
+                          options={[{ value: '2026', label: '2026' }, { value: '2025', label: '2025' }, { value: '2024', label: '2024' }]}
                           className="w-24 px-4 py-2 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:border-transparent"
                         />
                       </>
