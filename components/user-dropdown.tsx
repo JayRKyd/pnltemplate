@@ -1,16 +1,19 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useUser } from "@stackframe/stack";
 import { useTheme } from "next-themes";
+import { useRouter } from "next/navigation";
 import { 
   Settings, 
   Sun, 
   Moon, 
   LogOut, 
   Users,
+  Building2,
 } from 'lucide-react';
 import { Utilizatori } from '@/testcode/utilizatori';
+import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
 
 interface UserDropdownProps {
   colorModeToggle?: () => void;
@@ -18,9 +21,20 @@ interface UserDropdownProps {
 
 export function UserDropdown({ colorModeToggle }: UserDropdownProps) {
   const user = useUser({ or: 'redirect' });
+  const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
   const [showUtilizatori, setShowUtilizatori] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  // Check if current user is a Super Admin
+  useEffect(() => {
+    const checkSuperAdmin = async () => {
+      const result = await checkCurrentUserIsSuperAdmin();
+      setIsSuperAdmin(result);
+    };
+    checkSuperAdmin();
+  }, []);
 
   const handleThemeToggle = () => {
     if (colorModeToggle) {
@@ -43,6 +57,11 @@ export function UserDropdown({ colorModeToggle }: UserDropdownProps) {
 
   const handleTeamMembers = () => {
     setShowUtilizatori(true);
+    setIsOpen(false);
+  };
+
+  const handleCompanii = () => {
+    router.push('/companies');
     setIsOpen(false);
   };
 
@@ -125,6 +144,17 @@ export function UserDropdown({ colorModeToggle }: UserDropdownProps) {
                   <Users size={18} className="text-gray-400" />
                   Team Members
                 </button>
+
+                {/* Companii - Super Admin Only */}
+                {isSuperAdmin && (
+                  <button
+                    onClick={handleCompanii}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    <Building2 size={18} className="text-gray-400" />
+                    Companii
+                  </button>
+                )}
 
                 <button
                   onClick={handleThemeToggle}

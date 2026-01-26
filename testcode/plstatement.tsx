@@ -7,10 +7,52 @@ import { DeltaView } from './deltaview';
 import { MonthYearPicker } from './monthyearpicker';
 import { BudgetTemplateForm, BudgetTemplate } from './budgettemplateform';
 
+// Real data interface from server
+interface RealPnlData {
+  cheltuieli: number[];
+  categories: {
+    id: string;
+    name: string;
+    values: number[];
+    subcategories: {
+      id: string;
+      name: string;
+      values: number[];
+    }[];
+  }[];
+  venituri: number[];
+  budget: number[];
+  budgetCategories: {
+    id: string;
+    name: string;
+    values: number[];
+    subcategories: {
+      id: string;
+      name: string;
+      values: number[];
+    }[];
+  }[];
+  expenses: {
+    id: string;
+    date: string;
+    supplier: string;
+    description: string;
+    invoiceNumber: string;
+    amount: number;
+    status: string;
+    category: string;
+    subcategory: string;
+    type: 'reale' | 'recurente';
+  }[];
+}
+
 interface PLStatementProps {
   onBack: () => void;
   venituri: number[];
   setVenituri: (venituri: number[]) => void;
+  // Real data from database
+  realData?: RealPnlData;
+  teamId?: string;
 }
 
 interface Subcategory {
@@ -59,7 +101,7 @@ const mockInvoices: Invoice[] = [
 ];
 
 export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatementProps>(
-  ({ onBack, venituri, setVenituri }, ref) => {
+  ({ onBack, venituri, setVenituri, realData, teamId }, ref) => {
     const [activeTab, setActiveTab] = useState<'expenses' | 'budget' | 'delta'>('expenses');
     const [selectedCurrency, setSelectedCurrency] = useState<'EUR' | 'RON'>('EUR');
     const [selectedYear, setSelectedYear] = useState('2025');
@@ -180,8 +222,11 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
 
     const quarters = ['Q1-24', 'Q2-24', 'Q3-24', 'Q4-24', 'Q1-25', 'Q2-25', 'Q3-25', 'Q4-25'];
 
+    // Use real data if available, otherwise fall back to mock data
+    const hasRealData = realData && realData.categories && realData.categories.length > 0;
+    
     // Mock data structure - 24 months: first 12 for 2024, last 12 for 2025
-    const data = {
+    const mockData = {
       cheltuieli: [
         // 2024 data (Jan-Jul not shown in screenshot but needed for structure)
         40000, 42000, 48000, 52000, 54000, 58000, 62000, 
@@ -305,17 +350,48 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
       ]
     };
 
-    // Budget data - slightly higher than actual for comparison
-    const budgetVenituri = venituri.map(v => v * 1.05);
-    const budgetCheltuieli = data.cheltuieli.map(c => c * 0.95);
-    const budgetCategories = data.categories.map(cat => ({
-      ...cat,
-      values: cat.values.map(v => v * 0.95),
-      subcategories: cat.subcategories?.map(sub => ({
-        ...sub,
-        values: sub.values.map(v => v * 0.95)
+    // Use real data when available, otherwise use mock data
+    const data = hasRealData ? {
+      cheltuieli: realData.cheltuieli,
+      categories: realData.categories.map(cat => ({
+        name: cat.name,
+        values: cat.values,
+        subcategories: cat.subcategories.map(sub => ({
+          name: sub.name,
+          values: sub.values
+        }))
       }))
-    }));
+    } : mockData;
+
+    // Use real invoices when available
+    const invoices = hasRealData ? realData.expenses : mockInvoices;
+
+    // Budget data - use real budget when available, otherwise calculate from actual
+    const budgetVenituri = hasRealData && realData.budget 
+      ? realData.budget 
+      : venituri.map(v => v * 1.05);
+    
+    const budgetCheltuieli = hasRealData && realData.budget 
+      ? realData.budget 
+      : data.cheltuieli.map(c => c * 0.95);
+    
+    const budgetCategories = hasRealData && realData.budgetCategories && realData.budgetCategories.length > 0
+      ? realData.budgetCategories.map(cat => ({
+          name: cat.name,
+          values: cat.values,
+          subcategories: cat.subcategories?.map(sub => ({
+            name: sub.name,
+            values: sub.values
+          }))
+        }))
+      : data.categories.map(cat => ({
+          ...cat,
+          values: cat.values.map(v => v * 0.95),
+          subcategories: cat.subcategories?.map(sub => ({
+            ...sub,
+            values: sub.values.map(v => v * 0.95)
+          }))
+        }));
 
     const handleVenituriChange = (index: number, value: string) => {
       const numValue = value === '' ? 0 : parseFloat(value.replace(/\./g, '').replace(',', '.')) || 0;
@@ -907,7 +983,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                       {/* Content */}
                       <div className="overflow-y-auto flex-1 p-8 bg-white">
                         {(() => {
-                          const relevantInvoices = mockInvoices.filter(i => i.category === showInvoicesPopup.category);
+                          const relevantInvoices = invoices.filter(i => i.category === showInvoicesPopup.category || i.subcategory === showInvoicesPopup.category);
                           const realInvoices = relevantInvoices.filter(i => i.type === 'reale');
                           const recurrentInvoices = relevantInvoices.filter(i => i.type === 'recurente');
                           const total = relevantInvoices.reduce((sum, i) => sum + i.amount, 0);

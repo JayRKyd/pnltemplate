@@ -4,6 +4,11 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Check, X, Hourglass } from "lucide-react";
 import { getTeamExpenses, TeamExpense, ExpenseFilters } from "@/app/actions/expenses";
+import { 
+  getRecurringExpensesWithPayments, 
+  RecurringExpenseWithPayments,
+  updateRecurringPaymentStatus 
+} from "@/app/actions/recurring-expenses";
 
 type TabType = 'Cheltuieli' | 'Recurente';
 
@@ -161,38 +166,38 @@ const mockTableData = [
   },
 ];
 
-// Mock data for recurring expenses
+// Fallback mock data for recurring expenses (used when no real data)
 const mockRecurringExpenses = [
   { 
-    id: 1, 
+    id: '1', 
     furnizor: 'Adobe Systems Software', 
     descriere: 'Creative Cloud All Apps - 15 users', 
     suma: 1259.00,
     payments: { jul: true, aug: true, sep: true, oct: true, nov: true, dec: true }
   },
   { 
-    id: 2, 
+    id: '2', 
     furnizor: 'Slack Technologies LLC', 
     descriere: 'Slack Business+ - 45 users', 
     suma: 1750.00,
     payments: { jul: true, aug: true, sep: true, oct: true, nov: true, dec: true }
   },
   { 
-    id: 3, 
+    id: '3', 
     furnizor: 'Google Ireland Limited', 
     descriere: 'Google Workspace Business - 50 users', 
     suma: 3850.00,
     payments: { jul: false, aug: false, sep: true, oct: true, nov: true, dec: true }
   },
   { 
-    id: 4, 
+    id: '4', 
     furnizor: 'Zoom Video Communications', 
     descriere: 'Zoom Business - 20 host licenses', 
     suma: 1890.00,
     payments: { jul: true, aug: true, sep: true, oct: false, nov: true, dec: true }
   },
   { 
-    id: 5, 
+    id: '5', 
     furnizor: 'AWS Europe SARL', 
     descriere: 'Cloud hosting & storage infrastructure', 
     suma: 2200.00,
@@ -392,15 +397,26 @@ export default function ExpensesPage() {
   const params = useParams<{ teamId: string }>();
   const router = useRouter();
   const [expenses, setExpenses] = useState<TeamExpense[]>([]);
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpenseWithPayments[]>([]);
   const [loading, setLoading] = useState(true);
+  const [recurringLoading, setRecurringLoading] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState<TabType>('Cheltuieli');
   const [currentPage, setCurrentPage] = useState(1);
   const [searchValue, setSearchValue] = useState('');
+  const [selectedYear] = useState(new Date().getFullYear());
   const [paymentModalData, setPaymentModalData] = useState<{
     isOpen: boolean;
     index: number;
     supplierName: string;
     amount: string;
+    currentlyPaid: boolean;
+  } | null>(null);
+  const [recurringPaymentModal, setRecurringPaymentModal] = useState<{
+    isOpen: boolean;
+    recurringId: string;
+    supplierName: string;
+    monthKey: string;
+    monthIndex: number;
     currentlyPaid: boolean;
   } | null>(null);
   
@@ -424,9 +440,44 @@ export default function ExpensesPage() {
     }
   }, [params.teamId, searchValue]);
 
+  const loadRecurringExpenses = useCallback(async () => {
+    if (!params.teamId) return;
+
+    setRecurringLoading(true);
+    try {
+      const data = await getRecurringExpensesWithPayments(params.teamId, selectedYear);
+      setRecurringExpenses(data);
+    } catch (err) {
+      console.error("Failed to fetch recurring expenses:", err);
+    } finally {
+      setRecurringLoading(false);
+    }
+  }, [params.teamId, selectedYear]);
+
   useEffect(() => {
     loadExpenses();
-  }, [loadExpenses]);
+    loadRecurringExpenses();
+  }, [loadExpenses, loadRecurringExpenses]);
+
+  const handleRecurringPaymentToggle = async () => {
+    if (!recurringPaymentModal) return;
+
+    try {
+      await updateRecurringPaymentStatus(
+        recurringPaymentModal.recurringId,
+        params.teamId,
+        selectedYear,
+        recurringPaymentModal.monthIndex,
+        !recurringPaymentModal.currentlyPaid
+      );
+      // Reload data
+      await loadRecurringExpenses();
+    } catch (err) {
+      console.error("Failed to update payment status:", err);
+    } finally {
+      setRecurringPaymentModal(null);
+    }
+  };
 
   // Use real data if available, otherwise fall back to mock
   const displayData = expenses.length > 0 
@@ -829,143 +880,316 @@ export default function ExpensesPage() {
             overflow: 'hidden',
             boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)'
           }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{
-                  height: '50.5px',
-                  backgroundColor: 'rgba(44, 173, 189, 0.08)',
-                  borderBottom: '1px solid rgba(229, 231, 235, 0.5)'
-                }}>
-                  <th style={{ 
-                    width: '379.2px',
-                    textAlign: 'left', 
-                    paddingLeft: '24px', 
-                    fontSize: '12px', 
-                    fontWeight: 600, 
-                    color: 'rgba(74, 85, 101, 1)',
-                    letterSpacing: '0.6px'
+            {recurringLoading ? (
+              <div style={{ padding: '48px', textAlign: 'center', color: 'rgba(107, 114, 128, 1)' }}>
+                Se incarca...
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{
+                    height: '50.5px',
+                    backgroundColor: 'rgba(44, 173, 189, 0.08)',
+                    borderBottom: '1px solid rgba(229, 231, 235, 0.5)'
                   }}>
-                    FURNIZOR
-                  </th>
-                  <th style={{ 
-                    width: '452px',
-                    textAlign: 'left', 
-                    paddingLeft: '24px', 
-                    fontSize: '12px', 
-                    fontWeight: 600, 
-                    color: 'rgba(74, 85, 101, 1)',
-                    letterSpacing: '0.6px'
-                  }}>
-                    DESCRIERE
-                  </th>
-                  <th style={{ 
-                    width: '162.7px',
-                    textAlign: 'center', 
-                    fontSize: '12px', 
-                    fontWeight: 600, 
-                    color: 'rgba(74, 85, 101, 1)',
-                    letterSpacing: '0.6px'
-                  }}>
-                    RON
-                  </th>
-                  {['JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].map(month => (
-                    <th 
-                      key={month} 
-                      style={{ 
-                        width: '81.8px',
-                        textAlign: 'center', 
-                        fontSize: '12px', 
-                        fontWeight: 600, 
-                        color: 'rgba(74, 85, 101, 1)',
-                        letterSpacing: '0.6px'
-                      }}
-                    >
-                      {month}
+                    <th style={{ 
+                      width: '379.2px',
+                      textAlign: 'left', 
+                      paddingLeft: '24px', 
+                      fontSize: '12px', 
+                      fontWeight: 600, 
+                      color: 'rgba(74, 85, 101, 1)',
+                      letterSpacing: '0.6px'
+                    }}>
+                      FURNIZOR
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {mockRecurringExpenses.map((expense) => {
-                  const amountParts = formatDisplayAmount(expense.suma).split(',');
-                  const mainAmount = amountParts[0] + ',';
-                  const decimals = amountParts[1] || '00';
-                  
-                  return (
-                    <tr 
-                      key={expense.id} 
-                      style={{
-                        height: '65px',
-                        borderBottom: '1px solid rgba(229, 231, 235, 0.3)',
-                        cursor: 'pointer',
-                        transition: 'background-color 0.2s'
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(44, 173, 189, 0.02)')}
-                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                    >
-                      <td style={{ 
-                        width: '379.2px',
-                        paddingLeft: '24px', 
-                        fontSize: '15px', 
-                        fontWeight: 500, 
-                        color: 'rgba(16, 24, 40, 1)' 
-                      }}>
-                        {expense.furnizor}
-                      </td>
-                      <td style={{ 
-                        width: '452px',
-                        paddingLeft: '24px', 
-                        fontSize: '14px', 
-                        fontWeight: 400, 
-                        color: 'rgba(54, 65, 83, 1)' 
-                      }}>
-                        {expense.descriere}
-                      </td>
-                      <td style={{ width: '162.7px', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: '1px' }}>
-                          <span style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(10, 10, 10, 1)' }}>
-                            {mainAmount}
-                          </span>
-                          <span style={{ fontSize: '13px', fontWeight: 500, color: 'rgba(10, 10, 10, 1)' }}>
-                            {decimals}
-                          </span>
-                        </div>
-                      </td>
-                      <td style={{ width: '81.8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                          <MonthPaymentIcon paid={expense.payments.jul} />
-                        </div>
-                      </td>
-                      <td style={{ width: '81.8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                          <MonthPaymentIcon paid={expense.payments.aug} />
-                        </div>
-                      </td>
-                      <td style={{ width: '81.8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                          <MonthPaymentIcon paid={expense.payments.sep} />
-                        </div>
-                      </td>
-                      <td style={{ width: '81.8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                          <MonthPaymentIcon paid={expense.payments.oct} />
-                        </div>
-                      </td>
-                      <td style={{ width: '81.8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                          <MonthPaymentIcon paid={expense.payments.nov} />
-                        </div>
-                      </td>
-                      <td style={{ width: '81.8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                          <MonthPaymentIcon paid={expense.payments.dec} />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                    <th style={{ 
+                      width: '452px',
+                      textAlign: 'left', 
+                      paddingLeft: '24px', 
+                      fontSize: '12px', 
+                      fontWeight: 600, 
+                      color: 'rgba(74, 85, 101, 1)',
+                      letterSpacing: '0.6px'
+                    }}>
+                      DESCRIERE
+                    </th>
+                    <th style={{ 
+                      width: '162.7px',
+                      textAlign: 'center', 
+                      fontSize: '12px', 
+                      fontWeight: 600, 
+                      color: 'rgba(74, 85, 101, 1)',
+                      letterSpacing: '0.6px'
+                    }}>
+                      RON
+                    </th>
+                    {['JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].map(month => (
+                      <th 
+                        key={month} 
+                        style={{ 
+                          width: '81.8px',
+                          textAlign: 'center', 
+                          fontSize: '12px', 
+                          fontWeight: 600, 
+                          color: 'rgba(74, 85, 101, 1)',
+                          letterSpacing: '0.6px'
+                        }}
+                      >
+                        {month}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(recurringExpenses.length > 0 ? recurringExpenses.map((expense) => {
+                    const amount = expense.amount_with_vat || expense.amount || 0;
+                    const amountParts = formatDisplayAmount(amount).split(',');
+                    const mainAmount = amountParts[0] + ',';
+                    const decimals = amountParts[1] || '00';
+                    const monthKeys = ['jul', 'aug', 'sep', 'oct', 'nov', 'dec'] as const;
+                    const monthIndices = [6, 7, 8, 9, 10, 11]; // July to December
+                    
+                    return (
+                      <tr 
+                        key={expense.id} 
+                        style={{
+                          height: '65px',
+                          borderBottom: '1px solid rgba(229, 231, 235, 0.3)',
+                          cursor: 'pointer',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(44, 173, 189, 0.02)')}
+                        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                        onClick={() => router.push(`/dashboard/${params.teamId}/expenses/recurring/${expense.id}`)}
+                      >
+                        <td style={{ 
+                          width: '379.2px',
+                          paddingLeft: '24px', 
+                          fontSize: '15px', 
+                          fontWeight: 500, 
+                          color: 'rgba(16, 24, 40, 1)' 
+                        }}>
+                          {expense.supplier || '-'}
+                        </td>
+                        <td style={{ 
+                          width: '452px',
+                          paddingLeft: '24px', 
+                          fontSize: '14px', 
+                          fontWeight: 400, 
+                          color: 'rgba(54, 65, 83, 1)' 
+                        }}>
+                          {expense.description || '-'}
+                        </td>
+                        <td style={{ width: '162.7px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: '1px' }}>
+                            <span style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(10, 10, 10, 1)' }}>
+                              {mainAmount}
+                            </span>
+                            <span style={{ fontSize: '13px', fontWeight: 500, color: 'rgba(10, 10, 10, 1)' }}>
+                              {decimals}
+                            </span>
+                          </div>
+                        </td>
+                        {monthKeys.map((monthKey, idx) => (
+                          <td key={monthKey} style={{ width: '81.8px' }}>
+                            <div 
+                              style={{ display: 'flex', justifyContent: 'center' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRecurringPaymentModal({
+                                  isOpen: true,
+                                  recurringId: expense.id,
+                                  supplierName: expense.supplier || '-',
+                                  monthKey,
+                                  monthIndex: monthIndices[idx],
+                                  currentlyPaid: !!expense.payments[monthKey]
+                                });
+                              }}
+                            >
+                              <MonthPaymentIcon paid={!!expense.payments[monthKey]} />
+                            </div>
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  }) : mockRecurringExpenses.map((expense) => {
+                    const amountParts = formatDisplayAmount(expense.suma).split(',');
+                    const mainAmount = amountParts[0] + ',';
+                    const decimals = amountParts[1] || '00';
+                    
+                    return (
+                      <tr 
+                        key={expense.id} 
+                        style={{
+                          height: '65px',
+                          borderBottom: '1px solid rgba(229, 231, 235, 0.3)',
+                          cursor: 'pointer',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(44, 173, 189, 0.02)')}
+                        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <td style={{ 
+                          width: '379.2px',
+                          paddingLeft: '24px', 
+                          fontSize: '15px', 
+                          fontWeight: 500, 
+                          color: 'rgba(16, 24, 40, 1)' 
+                        }}>
+                          {expense.furnizor}
+                        </td>
+                        <td style={{ 
+                          width: '452px',
+                          paddingLeft: '24px', 
+                          fontSize: '14px', 
+                          fontWeight: 400, 
+                          color: 'rgba(54, 65, 83, 1)' 
+                        }}>
+                          {expense.descriere}
+                        </td>
+                        <td style={{ width: '162.7px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: '1px' }}>
+                            <span style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(10, 10, 10, 1)' }}>
+                              {mainAmount}
+                            </span>
+                            <span style={{ fontSize: '13px', fontWeight: 500, color: 'rgba(10, 10, 10, 1)' }}>
+                              {decimals}
+                            </span>
+                          </div>
+                        </td>
+                        <td style={{ width: '81.8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <MonthPaymentIcon paid={expense.payments.jul} />
+                          </div>
+                        </td>
+                        <td style={{ width: '81.8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <MonthPaymentIcon paid={expense.payments.aug} />
+                          </div>
+                        </td>
+                        <td style={{ width: '81.8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <MonthPaymentIcon paid={expense.payments.sep} />
+                          </div>
+                        </td>
+                        <td style={{ width: '81.8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <MonthPaymentIcon paid={expense.payments.oct} />
+                          </div>
+                        </td>
+                        <td style={{ width: '81.8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <MonthPaymentIcon paid={expense.payments.nov} />
+                          </div>
+                        </td>
+                        <td style={{ width: '81.8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <MonthPaymentIcon paid={expense.payments.dec} />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* Recurring Payment Status Modal */}
+        {recurringPaymentModal && (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 200,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <div 
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                backdropFilter: 'blur(4px)'
+              }}
+              onClick={() => setRecurringPaymentModal(null)}
+            />
+            
+            <div style={{
+              position: 'relative',
+              backgroundColor: 'white',
+              borderRadius: '16px',
+              boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              width: '100%',
+              maxWidth: '480px',
+              margin: '16px',
+              padding: '32px'
+            }}>
+              <h2 style={{
+                fontSize: '20px',
+                fontWeight: 600,
+                color: 'rgba(16, 24, 40, 1)',
+                marginBottom: '16px'
+              }}>
+                Confirmă schimbarea statusului
+              </h2>
+              
+              <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '8px' }}>
+                Ești sigur că vrei să schimbi statusul de plată pentru:
+              </p>
+              
+              <p style={{
+                color: 'rgba(16, 24, 40, 1)',
+                fontWeight: 600,
+                marginBottom: '16px'
+              }}>
+                {recurringPaymentModal.supplierName} - {recurringPaymentModal.monthKey.toUpperCase()}
+              </p>
+              
+              <p style={{
+                color: 'rgba(107, 114, 128, 1)',
+                fontSize: '14px',
+                marginBottom: '32px'
+              }}>
+                Statusul va fi schimbat din &ldquo;{recurringPaymentModal.currentlyPaid ? 'Plătit' : 'Neplătit'}&rdquo; în &ldquo;{recurringPaymentModal.currentlyPaid ? 'Neplătit' : 'Plătit'}&rdquo;.
+              </p>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  onClick={() => setRecurringPaymentModal(null)}
+                  style={{
+                    flex: 1,
+                    padding: '12px 24px',
+                    border: '1px solid rgba(229, 231, 235, 1)',
+                    borderRadius: '9999px',
+                    color: 'rgba(55, 65, 81, 1)',
+                    fontWeight: 500,
+                    backgroundColor: 'white',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Anulează
+                </button>
+                <button
+                  onClick={handleRecurringPaymentToggle}
+                  style={{
+                    flex: 1,
+                    padding: '12px 24px',
+                    background: 'linear-gradient(180deg, rgba(0, 212, 146, 1.00) 0%, rgba(81, 162, 255, 1.00) 100%)',
+                    color: 'white',
+                    borderRadius: '9999px',
+                    fontWeight: 500,
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0px 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                  }}
+                >
+                  Confirmă
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -977,7 +1201,11 @@ export default function ExpensesPage() {
           alignItems: 'center'
         }}>
           <span style={{ fontSize: '14px', color: 'rgba(0, 0, 0, 1)' }}>
-            Showing {activeSubTab === 'Recurente' ? mockRecurringExpenses.length : displayData.length} of {activeSubTab === 'Recurente' ? mockRecurringExpenses.length : totalItems} results
+            Showing {activeSubTab === 'Recurente' 
+              ? (recurringExpenses.length > 0 ? recurringExpenses.length : mockRecurringExpenses.length) 
+              : displayData.length} of {activeSubTab === 'Recurente' 
+              ? (recurringExpenses.length > 0 ? recurringExpenses.length : mockRecurringExpenses.length) 
+              : totalItems} results
           </span>
           
           <div style={{ display: 'flex', gap: '7px' }}>

@@ -168,6 +168,7 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
   // Document upload
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; preview: string; type: string; size: number }[]>([]);
   const [activePreviewIndex, setActivePreviewIndex] = useState(0);
+  const [imageZoom, setImageZoom] = useState(1);
   
   // Dropdown states
   const [showDocTypeDropdown, setShowDocTypeDropdown] = useState(false);
@@ -1367,41 +1368,114 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
           {/* Right Side Document Preview */}
           <div style={{
             width: '740px',
-            height: '562px',
+            minHeight: '562px',
+            maxHeight: '80vh',
             backgroundColor: 'rgba(255, 255, 255, 0.7)',
             border: '1px solid rgba(229, 231, 235, 0.3)',
             borderRadius: '16px',
             display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
+            flexDirection: 'column',
             boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
             overflow: 'hidden',
             position: 'relative'
           }}>
             {uploadedFiles.length > 0 ? (
               <>
-                {/* Preview Image/PDF */}
-                {uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? (
-                  <img 
-                    src={uploadedFiles[activePreviewIndex].preview} 
-                    alt="Document preview" 
-                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
-                  />
-                ) : (
-                  <iframe 
-                    src={uploadedFiles[activePreviewIndex].preview} 
-                    style={{ width: '100%', height: '100%', border: 'none' }}
-                    title="Document preview"
-                  />
+                {/* Image Zoom Controls - Only show for images */}
+                {uploadedFiles[activePreviewIndex]?.type.startsWith('image/') && (
+                  <div style={{ 
+                    position: 'absolute', 
+                    top: '16px', 
+                    left: '16px', 
+                    display: 'flex', 
+                    gap: '8px', 
+                    backgroundColor: 'rgba(255, 255, 255, 0.95)', 
+                    padding: '8px 12px', 
+                    borderRadius: '9999px', 
+                    boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.15)',
+                    zIndex: 10
+                  }}>
+                    <button 
+                      onClick={() => setImageZoom(prev => Math.max(0.5, prev - 0.25))}
+                      style={{ ...buttonBaseStyle, width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(243, 244, 246, 1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 600, color: 'rgba(55, 65, 81, 1)' }}
+                      title="Zoom out"
+                    >
+                      −
+                    </button>
+                    <span style={{ display: 'flex', alignItems: 'center', fontSize: '12px', fontWeight: 500, color: 'rgba(55, 65, 81, 1)', minWidth: '45px', justifyContent: 'center' }}>
+                      {Math.round(imageZoom * 100)}%
+                    </span>
+                    <button 
+                      onClick={() => setImageZoom(prev => Math.min(3, prev + 0.25))}
+                      style={{ ...buttonBaseStyle, width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(243, 244, 246, 1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 600, color: 'rgba(55, 65, 81, 1)' }}
+                      title="Zoom in"
+                    >
+                      +
+                    </button>
+                    <div style={{ width: '1px', backgroundColor: 'rgba(209, 213, 220, 1)', margin: '0 4px' }} />
+                    <button 
+                      onClick={() => setImageZoom(1)}
+                      style={{ ...buttonBaseStyle, padding: '4px 10px', borderRadius: '9999px', backgroundColor: imageZoom === 1 ? 'rgba(13, 148, 136, 0.1)' : 'rgba(243, 244, 246, 1)', fontSize: '11px', fontWeight: 500, color: imageZoom === 1 ? 'rgba(13, 148, 136, 1)' : 'rgba(55, 65, 81, 1)' }}
+                      title="Fit to view"
+                    >
+                      Fit
+                    </button>
+                    <button 
+                      onClick={() => setImageZoom(1.5)}
+                      style={{ ...buttonBaseStyle, padding: '4px 10px', borderRadius: '9999px', backgroundColor: imageZoom === 1.5 ? 'rgba(13, 148, 136, 0.1)' : 'rgba(243, 244, 246, 1)', fontSize: '11px', fontWeight: 500, color: imageZoom === 1.5 ? 'rgba(13, 148, 136, 1)' : 'rgba(55, 65, 81, 1)' }}
+                      title="150% zoom"
+                    >
+                      150%
+                    </button>
+                    <button 
+                      onClick={() => setImageZoom(2)}
+                      style={{ ...buttonBaseStyle, padding: '4px 10px', borderRadius: '9999px', backgroundColor: imageZoom === 2 ? 'rgba(13, 148, 136, 0.1)' : 'rgba(243, 244, 246, 1)', fontSize: '11px', fontWeight: 500, color: imageZoom === 2 ? 'rgba(13, 148, 136, 1)' : 'rgba(55, 65, 81, 1)' }}
+                      title="200% zoom"
+                    >
+                      200%
+                    </button>
+                  </div>
                 )}
+
+                {/* Scrollable Preview Area */}
+                <div style={{ 
+                  flex: 1, 
+                  overflow: 'auto', 
+                  display: 'flex', 
+                  justifyContent: 'center', 
+                  alignItems: uploadedFiles[activePreviewIndex]?.type.startsWith('image/') && imageZoom > 1 ? 'flex-start' : 'center',
+                  padding: uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? '60px 16px 60px 16px' : '0'
+                }}>
+                  {/* Preview Image/PDF */}
+                  {uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? (
+                    <img 
+                      src={uploadedFiles[activePreviewIndex].preview} 
+                      alt="Document preview" 
+                      style={{ 
+                        width: imageZoom === 1 ? '100%' : `${imageZoom * 100}%`,
+                        maxWidth: imageZoom === 1 ? '100%' : 'none',
+                        height: 'auto',
+                        objectFit: 'contain',
+                        cursor: imageZoom > 1 ? 'grab' : 'default',
+                        transition: 'width 0.2s ease'
+                      }} 
+                    />
+                  ) : (
+                    <iframe 
+                      src={uploadedFiles[activePreviewIndex].preview} 
+                      style={{ width: '100%', height: '100%', minHeight: '562px', border: 'none' }}
+                      title="Document preview"
+                    />
+                  )}
+                </div>
                 
                 {/* File Navigation */}
                 {uploadedFiles.length > 1 && (
-                  <div style={{ position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '8px', backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: '8px 16px', borderRadius: '9999px', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)' }}>
+                  <div style={{ position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '8px', backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '8px 16px', borderRadius: '9999px', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.15)', zIndex: 10 }}>
                     {uploadedFiles.map((_, idx) => (
                       <button 
                         key={idx} 
-                        onClick={() => setActivePreviewIndex(idx)}
+                        onClick={() => { setActivePreviewIndex(idx); setImageZoom(1); }}
                         style={{ 
                           ...buttonBaseStyle, 
                           width: '8px', 
@@ -1418,13 +1492,13 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
                 {/* Remove Button */}
                 <button 
                   onClick={() => removeUploadedFile(activePreviewIndex)}
-                  style={{ ...buttonBaseStyle, position: 'absolute', top: '16px', right: '16px', width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'rgba(255, 255, 255, 0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)' }}
+                  style={{ ...buttonBaseStyle, position: 'absolute', top: '16px', right: '16px', width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'rgba(255, 255, 255, 0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.15)', zIndex: 10 }}
                 >
                   <X size={16} style={{ color: 'rgba(239, 68, 68, 1)' }} />
                 </button>
               </>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}>
                 <Upload size={48} style={{ color: 'rgba(209, 213, 220, 1)' }} />
                 <span style={{ color: 'rgba(153, 161, 175, 1)', fontSize: '15px', fontWeight: 300 }}>Documentul va aparea aici</span>
               </div>

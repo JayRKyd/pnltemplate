@@ -15,7 +15,7 @@ interface Category {
 interface BudgetTemplateFormProps {
   year: string;
   onClose: () => void;
-  onSave: (template: BudgetTemplate) => void;
+  onSave: (template: BudgetTemplate) => void | Promise<void>;
   initialTemplate?: BudgetTemplate;
 }
 
@@ -129,13 +129,14 @@ export function BudgetTemplateForm({ year, onClose, onSave, initialTemplate }: B
     setCheltuieliCategories(newCategories);
   };
 
-  const handleSave = () => {
-    onSave({
+  const handleSave = async () => {
+    // Call onSave and let parent handle the close
+    await onSave({
       year,
       venituriCategories: venituriCategories.filter(cat => cat.name.trim() !== ''),
       cheltuieliCategories: cheltuieliCategories.filter(cat => cat.name.trim() !== '')
     });
-    onClose();
+    // Don't call onClose here - parent will handle navigation after save completes
   };
 
   const handleDownload = () => {

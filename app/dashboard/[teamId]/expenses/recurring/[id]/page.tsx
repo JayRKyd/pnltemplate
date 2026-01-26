@@ -4,7 +4,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { X, ChevronDown, Check } from 'lucide-react';
 import { getCategoryTree, CategoryWithChildren } from '@/app/actions/categories';
-import { createRecurringExpense } from '@/app/actions/recurring-expenses';
+import { 
+  getRecurringExpense, 
+  updateRecurringExpense, 
+  RecurringExpense,
+  deactivateRecurringExpense,
+  reactivateRecurringExpense
+} from '@/app/actions/recurring-expenses';
 
 interface MonthPayment {
   month: string;
@@ -12,11 +18,14 @@ interface MonthPayment {
   paid: boolean;
 }
 
-export default function NewRecurringExpensePage() {
-  const params = useParams<{ teamId: string }>();
+export default function RecurringExpenseDetailPage() {
+  const params = useParams<{ teamId: string; id: string }>();
   const router = useRouter();
   
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [recurringExpense, setRecurringExpense] = useState<RecurringExpense | null>(null);
+  
   const [activeStatus, setActiveStatus] = useState<'activ' | 'inactiv'>('activ');
   const [numeFurnizor, setNumeFurnizor] = useState('');
   const [cuiFurnizor, setCuiFurnizor] = useState('');
@@ -50,22 +59,56 @@ export default function NewRecurringExpensePage() {
       months.push({
         month: romanianMonths[date.getMonth()],
         year: date.getFullYear(),
-        paid: true // Default to paid for new expenses
+        paid: true // Default to paid
       });
     }
     setMonthlyPayments(months);
   }, []);
 
-  // Load categories
+  // Load recurring expense data
   useEffect(() => {
-    async function loadCategories() {
-      if (params.teamId) {
-        const cats = await getCategoryTree(params.teamId);
+    async function loadData() {
+      if (!params.id || !params.teamId) return;
+      
+      setLoading(true);
+      try {
+        const [expense, cats] = await Promise.all([
+          getRecurringExpense(params.id),
+          getCategoryTree(params.teamId)
+        ]);
+        
         setCategories(cats);
+        
+        if (expense) {
+          setRecurringExpense(expense);
+          setActiveStatus(expense.is_active ? 'activ' : 'inactiv');
+          setNumeFurnizor(expense.supplier || '');
+          setDescriere(expense.description || '');
+          setTags(expense.tags?.join(', ') || '');
+          setCont(expense.category_id || '');
+          setSubcont(expense.subcategory_id || '');
+          setTvaDeductibil(expense.vat_deductible ? 'Da' : 'Nu');
+          
+          if (expense.amount_with_vat) {
+            setSumaCuTVA(formatAmount(expense.amount_with_vat));
+          }
+          if (expense.amount_without_vat) {
+            setSumaFaraTVA(formatAmount(expense.amount_without_vat));
+          }
+          if (expense.amount_with_vat && expense.amount_without_vat) {
+            const vatAmount = expense.amount_with_vat - expense.amount_without_vat;
+            setTva(formatAmount(vatAmount));
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load recurring expense:', error);
+      } finally {
+        setLoading(false);
       }
     }
-    loadCategories();
-  }, [params.teamId]);
+    
+    loadData();
+  }, [params.id, params.teamId]);
 
   const formatAmount = (amount: number): string => {
     return amount.toLocaleString('ro-RO', {
@@ -107,29 +150,29 @@ export default function NewRecurringExpensePage() {
   };
 
   const handleSave = async () => {
-    if (saving) return;
+    if (!recurringExpense) return;
     
     setSaving(true);
     try {
-      const amountWithVat = parseAmount(sumaCuTVA);
-      const amountWithoutVat = parseAmount(sumaFaraTVA);
-      const amount = amountWithoutVat || amountWithVat;
-      
-      await createRecurringExpense({
-        teamId: params.teamId,
-        amount: amount,
-        amountWithVat: amountWithVat || undefined,
-        amountWithoutVat: amountWithoutVat || undefined,
-        vatDeductible: tvaDeductibil === 'Da',
-        categoryId: cont || undefined,
-        subcategoryId: subcont || undefined,
+      // Update the recurring expense
+      await updateRecurringExpense(params.id, params.teamId, {
         supplier: numeFurnizor || undefined,
         description: descriere || undefined,
         tags: tags ? tags.split(',').map(t => t.trim()) : undefined,
-        recurrenceType: 'monthly',
-        dayOfMonth: 1,
-        startDate: new Date().toISOString().split('T')[0],
+        categoryId: cont || undefined,
+        subcategoryId: subcont || undefined,
+        vatDeductible: tvaDeductibil === 'Da',
+        amountWithVat: parseAmount(sumaCuTVA) || undefined,
+        amountWithoutVat: parseAmount(sumaFaraTVA) || undefined,
+        amount: parseAmount(sumaFaraTVA) || parseAmount(sumaCuTVA),
       });
+      
+      // Handle active/inactive status
+      if (activeStatus === 'activ' && !recurringExpense.is_active) {
+        await reactivateRecurringExpense(params.id, params.teamId);
+      } else if (activeStatus === 'inactiv' && recurringExpense.is_active) {
+        await deactivateRecurringExpense(params.id, params.teamId);
+      }
       
       router.push(`/dashboard/${params.teamId}/expenses`);
     } catch (error) {
@@ -164,6 +207,23 @@ export default function NewRecurringExpensePage() {
     color: 'rgba(107, 114, 128, 1)',
     fontWeight: 400
   };
+
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        background: 'rgba(248, 250, 252, 1)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: '"Inter", sans-serif'
+      }}>
+        <div style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '16px' }}>
+          Se încarcă...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
