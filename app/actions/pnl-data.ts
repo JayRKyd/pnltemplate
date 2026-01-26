@@ -117,8 +117,25 @@ export async function getPnlData(
     return -1; // Out of range
   };
 
+  // Type for expense data
+  interface ExpenseRecord {
+    id: string;
+    expense_date: string;
+    supplier_name: string | null;
+    description: string | null;
+    document_number: string | null;
+    amount: number | null;
+    amount_with_vat: number | null;
+    amount_without_vat: number | null;
+    vat_deductible: boolean | null;
+    status: string | null;
+    category_id: string | null;
+    subcategory_id: string | null;
+    is_recurring: boolean | null;
+  }
+
   // Helper to get expense amount based on VAT deductibility
-  const getExpenseAmount = (expense: typeof expensesData[0]): number => {
+  const getExpenseAmount = (expense: ExpenseRecord): number => {
     if (expense.vat_deductible) {
       return expense.amount_without_vat || expense.amount || 0;
     }
