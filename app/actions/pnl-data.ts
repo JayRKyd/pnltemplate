@@ -68,14 +68,15 @@ export async function getPnlData(
   const childCategories = categoriesData?.filter(c => c.parent_id) || [];
 
   // Get all expenses for both years
+  // Include 'draft' status so newly added expenses show up
   const { data: expensesData } = await supabase
     .from("team_expenses")
     .select(`
       id,
       expense_date,
-      supplier_name,
+      supplier,
       description,
-      document_number,
+      doc_number,
       amount,
       amount_with_vat,
       amount_without_vat,
@@ -83,13 +84,13 @@ export async function getPnlData(
       status,
       category_id,
       subcategory_id,
-      is_recurring
+      is_recurring_placeholder
     `)
     .eq("team_id", teamId)
     .is("deleted_at", null)
     .gte("expense_date", `${prevYear}-01-01`)
     .lte("expense_date", `${baseYear}-12-31`)
-    .in("status", ["approved", "paid", "pending"]);
+    .in("status", ["approved", "paid", "pending", "draft"]);
 
   // Get revenues for both years
   const { data: revenuesData } = await supabase
@@ -121,9 +122,9 @@ export async function getPnlData(
   interface ExpenseRecord {
     id: string;
     expense_date: string;
-    supplier_name: string | null;
+    supplier: string | null;
     description: string | null;
-    document_number: string | null;
+    doc_number: string | null;
     amount: number | null;
     amount_with_vat: number | null;
     amount_without_vat: number | null;
@@ -131,7 +132,7 @@ export async function getPnlData(
     status: string | null;
     category_id: string | null;
     subcategory_id: string | null;
-    is_recurring: boolean | null;
+    is_recurring_placeholder: boolean | null;
   }
 
   // Helper to get expense amount based on VAT deductibility
@@ -211,6 +212,29 @@ export async function getPnlData(
       subcategories,
     };
   });
+
+  // Add "Uncategorized" category for expenses without a category_id
+  // This ensures ALL expenses show up, even if categories aren't defined
+  const uncategorizedValues = emptyMonths();
+  expensesData?.forEach(expense => {
+    if (!expense.category_id) {
+      const idx = getMonthIndex(expense.expense_date);
+      if (idx >= 0 && idx < 24) {
+        uncategorizedValues[idx] += getExpenseAmount(expense);
+      }
+    }
+  });
+  
+  // Only add Uncategorized if there are uncategorized expenses
+  const hasUncategorized = uncategorizedValues.some(v => v > 0);
+  if (hasUncategorized) {
+    categories.push({
+      id: 'uncategorized',
+      name: 'Neclasificate',
+      values: uncategorizedValues,
+      subcategories: [],
+    });
+  }
 
   // Calculate revenue per month
   const venituri = emptyMonths();
@@ -293,14 +317,14 @@ export async function getPnlData(
     return {
       id: e.id,
       date: e.expense_date,
-      supplier: e.supplier_name || 'Unknown',
+      supplier: e.supplier || 'Unknown',
       description: e.description || '',
-      invoiceNumber: e.document_number || '',
+      invoiceNumber: e.doc_number || '',
       amount: getExpenseAmount(e),
       status: e.status || 'pending',
       category: cat?.name || 'Uncategorized',
       subcategory: subcat?.name || '',
-      type: e.is_recurring ? 'recurente' : 'reale',
+      type: e.is_recurring_placeholder ? 'recurente' : 'reale',
     };
   });
 
@@ -349,15 +373,15 @@ export async function getCategoryExpenses(
     .select(`
       id,
       expense_date,
-      supplier_name,
+      supplier,
       description,
-      document_number,
+      doc_number,
       amount,
       amount_with_vat,
       amount_without_vat,
       vat_deductible,
       status,
-      is_recurring
+      is_recurring_placeholder
     `)
     .eq("team_id", teamId)
     .is("deleted_at", null)
@@ -368,14 +392,14 @@ export async function getCategoryExpenses(
   return (expenses || []).map(e => ({
     id: e.id,
     date: e.expense_date,
-    supplier: e.supplier_name || 'Unknown',
+    supplier: e.supplier || 'Unknown',
     description: e.description || '',
-    invoiceNumber: e.document_number || '',
+    invoiceNumber: e.doc_number || '',
     amount: e.vat_deductible ? (e.amount_without_vat || e.amount || 0) : (e.amount_with_vat || e.amount || 0),
     status: e.status || 'pending',
     category: categoryName,
     subcategory: '',
-    type: e.is_recurring ? 'recurente' : 'reale',
+    type: e.is_recurring_placeholder ? 'recurente' : 'reale',
   }));
 }
 

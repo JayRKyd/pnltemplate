@@ -587,8 +587,17 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     }
   }, [showValidationErrors, furnizor, docType, uploadedFiles.length]);
 
+  // Track if save is in progress to prevent double-clicks
+  const [saveInProgress, setSaveInProgress] = useState(false);
+
   // Handle save
   const handleSave = async (forceDraft = false) => {
+    // Prevent double-clicks
+    if (saveInProgress || loading) {
+      console.log("Save already in progress, ignoring click");
+      return;
+    }
+    
     const missing = checkMissingFields();
     
     // Show validation errors on fields
@@ -607,6 +616,7 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     }
 
     const isDraft = forceDraft || missing.length > 0;
+    setSaveInProgress(true);
     setLoading(true);
     setShowDuplicateWarning(false);
     setShowDraftConfirmModal(false);
@@ -683,13 +693,16 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
       setShowServerErrorModal(true);
     } finally {
       setLoading(false);
+      setSaveInProgress(false);
     }
   };
 
   const retrySave = useCallback(() => {
     setShowServerErrorModal(false);
+    setSaveInProgress(false); // Reset to allow retry
     if (lastSaveAttempt) {
-      handleSave(lastSaveAttempt.forceDraft);
+      // Small delay to ensure state is updated before retry
+      setTimeout(() => handleSave(lastSaveAttempt.forceDraft), 100);
     }
   }, [lastSaveAttempt]);
 

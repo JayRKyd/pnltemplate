@@ -56,7 +56,7 @@ export async function getRecurringExpenses(
   includeInactive = false
 ): Promise<RecurringExpense[]> {
   let query = supabase
-    .from("recurring_expenses")
+    .from("team_recurring_expenses")
     .select("*")
     .eq("team_id", teamId)
     .is("deleted_at", null);
@@ -78,7 +78,7 @@ export async function getRecurringExpenses(
 // Get single recurring expense
 export async function getRecurringExpense(id: string): Promise<RecurringExpense | null> {
   const { data, error } = await supabase
-    .from("recurring_expenses")
+    .from("team_recurring_expenses")
     .select("*")
     .eq("id", id)
     .is("deleted_at", null)
@@ -103,7 +103,7 @@ export async function createRecurringExpense(
   }
 
   const { data, error } = await supabase
-    .from("recurring_expenses")
+    .from("team_recurring_expenses")
     .insert({
       team_id: input.teamId,
       user_id: user.id,
@@ -162,7 +162,7 @@ export async function updateRecurringExpense(
   if (updates.endDate !== undefined) updateData.end_date = updates.endDate;
 
   const { data, error } = await supabase
-    .from("recurring_expenses")
+    .from("team_recurring_expenses")
     .update(updateData)
     .eq("id", id)
     .eq("team_id", teamId)
@@ -184,7 +184,7 @@ export async function deactivateRecurringExpense(
   teamId: string
 ): Promise<RecurringExpense> {
   const { data, error } = await supabase
-    .from("recurring_expenses")
+    .from("team_recurring_expenses")
     .update({ is_active: false })
     .eq("id", id)
     .eq("team_id", teamId)
@@ -205,7 +205,7 @@ export async function reactivateRecurringExpense(
   teamId: string
 ): Promise<RecurringExpense> {
   const { data, error } = await supabase
-    .from("recurring_expenses")
+    .from("team_recurring_expenses")
     .update({ is_active: true })
     .eq("id", id)
     .eq("team_id", teamId)
@@ -223,7 +223,7 @@ export async function reactivateRecurringExpense(
 // Soft delete recurring expense
 export async function deleteRecurringExpense(id: string, teamId: string): Promise<void> {
   const { error } = await supabase
-    .from("recurring_expenses")
+    .from("team_recurring_expenses")
     .update({ deleted_at: new Date().toISOString(), is_active: false })
     .eq("id", id)
     .eq("team_id", teamId);
@@ -265,7 +265,7 @@ export async function findMatchingRecurring(
   if (!supplier && !subcategoryId) return null;
 
   let query = supabase
-    .from("recurring_expenses")
+    .from("team_recurring_expenses")
     .select("*")
     .eq("team_id", teamId)
     .eq("is_active", true)
@@ -363,7 +363,7 @@ export async function getRecurringExpensesWithPayments(
 ): Promise<RecurringExpenseWithPayments[]> {
   // Get all recurring expenses
   const { data: recurringExpenses, error: recError } = await supabase
-    .from("recurring_expenses")
+    .from("team_recurring_expenses")
     .select(`
       *,
       category:team_expense_categories!category_id(name),

@@ -229,7 +229,11 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
     const quarters = ['Q1-24', 'Q2-24', 'Q3-24', 'Q4-24', 'Q1-25', 'Q2-25', 'Q3-25', 'Q4-25'];
 
     // Use real data if available, otherwise fall back to mock data
-    const hasRealData = realData && realData.categories && realData.categories.length > 0;
+    // Check if we have real expenses data (even if categories are empty)
+    const hasRealData = realData && (
+      (realData.categories && realData.categories.length > 0) || 
+      (realData.cheltuieli && realData.cheltuieli.some(v => v > 0))
+    );
     
     // Mock data structure - 24 months: first 12 for 2025, last 12 for 2026
     const mockData = {
@@ -432,10 +436,10 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         const yearOffset = selectedYear === '2026' ? 12 : 0;
         return values.slice(yearOffset, yearOffset + 12);
       }
-      // P&L Realizat view: Rolling fiscal year (Aug-Aug)
-      // Always return Aug previous year -> Aug current year (13 months)
-      // For 2026: Aug 2025 (index 7) -> Aug 2026 (index 19)
-      return values.slice(7, 20);
+      // P&L Realizat view: Rolling year (Jan-Jan)
+      // Always return Jan previous year -> Jan current year (13 months)
+      // For 2026: Jan 2025 (index 0) -> Jan 2026 (index 12)
+      return values.slice(0, 13);
     };
 
     // Get month labels based on active tab
@@ -444,15 +448,15 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         // Budget view: Calendar year (Jan-Dec)
         return ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
       }
-      // P&L Realizat view: Fiscal year (Aug-Aug)
-      return ['AUG', 'SEP', 'OCT', 'NOV', 'DEC', 'IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG'];
+      // P&L Realizat view: Rolling year (Jan-Jan)
+      return ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC', 'IAN'];
     };
 
     // Determine if an index is the current month (only for P&L Realizat view)
     const isCurrentMonth = (index: number) => {
       if (activeTab === 'budget') return false; // No current month highlight in budget view
-      // In fiscal year view (Aug-Aug), Jan 2026 is index 5 (0=Aug, 1=Sep, 2=Oct, 3=Nov, 4=Dec, 5=Jan)
-      return index === 5; // Jan 2026 is the current month
+      // In Jan-Jan view, Jan 2026 is index 12 (last column)
+      return index === 12; // Jan 2026 is the current month
     };
 
     // Get column styles for highlights
@@ -470,7 +474,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
       const isCurrent = isCurrentMonth(index);
       
       if (isCurrent) {
-        // Last Aug column highlighted (Orange/Beige)
+        // Current month (Jan 2026) highlighted (Orange/Beige)
         return {
           backgroundColor: isHeader ? '#FFF1E6' : '#FFF1E6',
           fontWeight: 700,
@@ -478,8 +482,8 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         };
       }
       
-      // Header-specific bolding for Aug-Dec (past year months)
-      if (isHeader && index < 5) { // Aug-Dec
+      // Header-specific styling for previous year months (Jan-Dec 2025)
+      if (isHeader && index < 12) {
         return {
           color: '#9CA3AF', // Gray for past year
           fontWeight: 600
@@ -500,7 +504,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
           alignItems: 'center'
         };
       }
-      // P&L Realizat: 13 months + YTD
+      // P&L Realizat: 13 months (Jan-Jan) + YTD
       return {
         display: 'grid',
         gridTemplateColumns: '220px repeat(13, minmax(60px, 1fr)) 100px',
