@@ -1,11 +1,12 @@
 // @ts-nocheck
 import React, { useState, forwardRef, useImperativeHandle, useRef } from 'react';
-import { RefreshCw, Download, Check, Upload, ChevronRight, ChevronDown, X } from 'lucide-react';
+import { RefreshCw, Download, Check, Upload, ChevronRight, ChevronDown, X, Loader2 } from 'lucide-react';
 import { CustomSelect } from './customselect';
 import { CategoryDetail } from './categorydetail';
 import { DeltaView } from './deltaview';
 import { MonthYearPicker } from './monthyearpicker';
 import { BudgetTemplateForm, BudgetTemplate } from './budgettemplateform';
+import { importBudgetFromExcel } from '@/app/actions/budget';
 
 // Real data interface from server
 interface RealPnlData {
@@ -55,6 +56,8 @@ interface PLStatementProps {
   teamId?: string;
   // Budget template save function
   onSaveBudgetTemplate?: (teamId: string, template: BudgetTemplate) => Promise<{ success: boolean; error?: string }>;
+  // Callback when budget is uploaded to refresh data
+  onBudgetUploaded?: () => void;
 }
 
 interface Subcategory {
@@ -103,7 +106,7 @@ const mockInvoices: Invoice[] = [
 ];
 
 export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatementProps>(
-  ({ onBack, venituri, setVenituri, realData, teamId, onSaveBudgetTemplate }, ref) => {
+  ({ onBack, venituri, setVenituri, realData, teamId, onSaveBudgetTemplate, onBudgetUploaded }, ref) => {
     const [activeTab, setActiveTab] = useState<'expenses' | 'budget' | 'delta'>('expenses');
     const [selectedCurrency, setSelectedCurrency] = useState<'EUR' | 'RON'>('EUR');
     const [selectedYear, setSelectedYear] = useState('2026');
@@ -143,6 +146,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
     });
     const [showInvoicesPopup, setShowInvoicesPopup] = useState<{ category: string, month: string } | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [uploadingBudget, setUploadingBudget] = useState(false);
     const [uploadedBudgets, setUploadedBudgets] = useState<{[year: string]: string}>({
       '2025': 'Buget_2025.xlsx'
     });
@@ -509,13 +513,53 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
       fileInputRef.current?.click();
     };
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) {
-        setUploadedBudgets(prev => ({
-          ...prev,
-          [selectedYear]: file.name
-        }));
+      if (file && teamId) {
+        setUploadingBudget(true);
+        try {
+          // Read file as base64
+          const reader = new FileReader();
+          reader.onload = async (event) => {
+            const base64 = (event.target?.result as string)?.split(',')[1];
+            if (base64) {
+              try {
+                const result = await importBudgetFromExcel(
+                  teamId,
+                  parseInt(selectedYear),
+                  base64,
+                  file.name
+                );
+                
+                if (result.imported > 0) {
+                  setUploadedBudgets(prev => ({
+                    ...prev,
+                    [selectedYear]: file.name
+                  }));
+                  alert(`Buget importat cu succes!\n${result.imported} rânduri importate${result.failed > 0 ? `\n${result.failed} rânduri cu erori` : ''}`);
+                  
+                  // Trigger refresh of P&L data
+                  onBudgetUploaded?.();
+                } else {
+                  alert(`Eroare la import: ${result.errors.join('\n')}`);
+                }
+              } catch (err) {
+                console.error('Budget import error:', err);
+                alert('Eroare la importul bugetului: ' + (err instanceof Error ? err.message : 'Eroare necunoscută'));
+              }
+            }
+            setUploadingBudget(false);
+          };
+          reader.onerror = () => {
+            alert('Eroare la citirea fișierului');
+            setUploadingBudget(false);
+          };
+          reader.readAsDataURL(file);
+        } catch (err) {
+          console.error('File read error:', err);
+          alert('Eroare la citirea fișierului');
+          setUploadingBudget(false);
+        }
       }
       // Reset input
       if (fileInputRef.current) {
@@ -688,10 +732,11 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                         />
                         <button
                           onClick={handleBudgetUpload}
-                          className="px-5 py-2 bg-white border border-gray-200 text-gray-700 rounded-full text-sm font-medium hover:bg-gray-50 transition-colors flex items-center gap-2 whitespace-nowrap"
+                          disabled={uploadingBudget}
+                          className="px-5 py-2 bg-white border border-gray-200 text-gray-700 rounded-full text-sm font-medium hover:bg-gray-50 transition-colors flex items-center gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <Upload size={16} />
-                          Încarcă buget {selectedYear}
+                          {uploadingBudget ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                          {uploadingBudget ? 'Se încarcă...' : `Încarcă buget ${selectedYear}`}
                         </button>
                         <input
                           type="file"

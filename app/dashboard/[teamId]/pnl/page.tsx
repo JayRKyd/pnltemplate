@@ -73,6 +73,20 @@ export default function PnlPage() {
     }
   };
 
+  // Handle budget upload - refresh P&L data
+  const handleBudgetUploaded = async () => {
+    setLoading(true);
+    try {
+      const data = await getPnlData(params.teamId, currentYear);
+      setPnlData(data);
+      setVenituri(data.venituri);
+    } catch (err) {
+      console.error("Error refreshing P&L data:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#F8F9FA] flex items-center justify-center">
@@ -105,6 +119,7 @@ export default function PnlPage() {
         realData={pnlData || undefined}
         teamId={params.teamId}
         onSaveBudgetTemplate={handleSaveBudgetTemplate}
+        onBudgetUploaded={handleBudgetUploaded}
       />
     </div>
   );

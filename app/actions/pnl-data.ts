@@ -388,20 +388,37 @@ export async function updateRevenue(
   month: number,
   amount: number
 ): Promise<{ success: boolean; error?: string }> {
-  const { error } = await supabase
+  // First check if a record exists
+  const { data: existing } = await supabase
     .from("team_revenues")
-    .upsert(
-      {
+    .select("id")
+    .eq("team_id", teamId)
+    .eq("year", year)
+    .eq("month", month)
+    .eq("source", "manual")
+    .single();
+
+  let error;
+  if (existing) {
+    // Update existing record
+    const result = await supabase
+      .from("team_revenues")
+      .update({ amount, updated_at: new Date().toISOString() })
+      .eq("id", existing.id);
+    error = result.error;
+  } else {
+    // Insert new record
+    const result = await supabase
+      .from("team_revenues")
+      .insert({
         team_id: teamId,
         year,
         month,
         amount,
         source: 'manual',
-      },
-      {
-        onConflict: "team_id,year,month,source",
-      }
-    );
+      });
+    error = result.error;
+  }
 
   if (error) {
     console.error("[updateRevenue] Error:", error);
