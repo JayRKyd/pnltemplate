@@ -97,7 +97,7 @@ export default function NewRecurringExpensePage() {
   }, [sumaCuTVA, sumaFaraTVA]);
 
   const handleClose = () => {
-    router.push(`/dashboard/${params.teamId}/expenses`);
+    router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
   };
 
   const toggleMonthPayment = (index: number) => {
@@ -131,7 +131,7 @@ export default function NewRecurringExpensePage() {
         startDate: new Date().toISOString().split('T')[0],
       });
       
-      router.push(`/dashboard/${params.teamId}/expenses`);
+      router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
     } catch (error) {
       console.error('Failed to save recurring expense:', error);
       alert('Eroare la salvare. Încearcă din nou.');

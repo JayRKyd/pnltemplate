@@ -1120,7 +1120,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         </div>
 
         {/* Form Details Area */}
-        <div style={{ display: 'flex', gap: '16px', marginTop: '12px' }}>
+        <div style={{ display: 'flex', gap: '16px', marginTop: '12px', alignItems: 'flex-start' }}>
           {/* Left Column - Form Fields */}
           <div style={{ width: '493.5px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {lines.map((line, index) => (
@@ -1494,14 +1494,17 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
           {/* Right Side Document Preview */}
           <div style={{
             width: '740px',
-            minHeight: '562px',
+            height: '562px',
             backgroundColor: 'rgba(255, 255, 255, 0.7)',
             border: '1px solid rgba(229, 231, 235, 0.3)',
             borderRadius: '16px',
             display: 'flex',
             flexDirection: 'column',
             boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
-            position: 'relative'
+            position: 'sticky',
+            top: '100px',
+            flexShrink: 0,
+            overflow: 'hidden'
           }}>
             {uploadedFiles.length > 0 ? (
               <>
@@ -1561,11 +1564,12 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                   </div>
                 )}
 
-                {/* Preview Area - page scrolls instead of this container */}
+                {/* Preview Area - contained within fixed height */}
                 <div style={{ 
                   flex: 1, 
                   position: 'relative',
-                  padding: uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? '60px 16px 60px 16px' : '0'
+                  overflow: 'auto',
+                  padding: uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? '60px 16px 16px 16px' : '0'
                 }}>
                   {/* Preview Image/PDF */}
                   {uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? (

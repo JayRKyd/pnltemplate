@@ -9,7 +9,9 @@ import {
   updateRecurringExpense, 
   RecurringExpense,
   deactivateRecurringExpense,
-  reactivateRecurringExpense
+  reactivateRecurringExpense,
+  getGeneratedExpenses,
+  updateRecurringPaymentStatus
 } from '@/app/actions/recurring-expenses';
 
 interface MonthPayment {
@@ -44,6 +46,7 @@ export default function RecurringExpenseDetailPage() {
   
   // Monthly payments state - 12 months
   const [monthlyPayments, setMonthlyPayments] = useState<MonthPayment[]>([]);
+  const [updatingPayment, setUpdatingPayment] = useState<number | null>(null);
 
   // Generate months from current date going back 12 months
   useEffect(() => {
@@ -59,22 +62,23 @@ export default function RecurringExpenseDetailPage() {
       months.push({
         month: romanianMonths[date.getMonth()],
         year: date.getFullYear(),
-        paid: true // Default to paid
+        paid: false // Default to unpaid, will be loaded from DB
       });
     }
     setMonthlyPayments(months);
   }, []);
 
-  // Load recurring expense data
+  // Load recurring expense data and payment status
   useEffect(() => {
     async function loadData() {
       if (!params.id || !params.teamId) return;
       
       setLoading(true);
       try {
-        const [expense, cats] = await Promise.all([
+        const [expense, cats, generatedExpenses] = await Promise.all([
           getRecurringExpense(params.id),
-          getCategoryTree(params.teamId)
+          getCategoryTree(params.teamId),
+          getGeneratedExpenses(params.id, params.teamId)
         ]);
         
         setCategories(cats);
@@ -83,6 +87,7 @@ export default function RecurringExpenseDetailPage() {
           setRecurringExpense(expense);
           setActiveStatus(expense.is_active ? 'activ' : 'inactiv');
           setNumeFurnizor(expense.supplier || '');
+          setCuiFurnizor(''); // CUI not stored in recurring expense
           setDescriere(expense.description || '');
           setTags(expense.tags?.join(', ') || '');
           setCont(expense.category_id || '');
@@ -99,6 +104,26 @@ export default function RecurringExpenseDetailPage() {
             const vatAmount = expense.amount_with_vat - expense.amount_without_vat;
             setTva(formatAmount(vatAmount));
           }
+
+          // Load actual payment status for each month
+          setMonthlyPayments(prev => {
+            const expenseMap = new Map<string, boolean>();
+            generatedExpenses.forEach(exp => {
+              const date = new Date(exp.expense_date);
+              const key = `${date.getFullYear()}-${date.getMonth()}`;
+              // Mark as paid if status is 'paid' or if it's not a placeholder
+              expenseMap.set(key, exp.status === 'paid' || !exp.is_recurring_placeholder);
+            });
+
+            return prev.map(mp => {
+              const date = new Date(mp.year, getMonthIndex(mp.month), 1);
+              const key = `${date.getFullYear()}-${date.getMonth()}`;
+              return {
+                ...mp,
+                paid: expenseMap.get(key) || false
+              };
+            });
+          });
         }
       } catch (error) {
         console.error('Failed to load recurring expense:', error);
@@ -109,6 +134,15 @@ export default function RecurringExpenseDetailPage() {
     
     loadData();
   }, [params.id, params.teamId]);
+
+  // Helper to get month index from Romanian name
+  const getMonthIndex = (monthName: string): number => {
+    const romanianMonths = [
+      'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
+      'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
+    ];
+    return romanianMonths.indexOf(monthName);
+  };
 
   const formatAmount = (amount: number): string => {
     return amount.toLocaleString('ro-RO', {
@@ -140,13 +174,40 @@ export default function RecurringExpenseDetailPage() {
   }, [sumaCuTVA, sumaFaraTVA]);
 
   const handleClose = () => {
-    router.push(`/dashboard/${params.teamId}/expenses`);
+    router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
   };
 
-  const toggleMonthPayment = (index: number) => {
-    setMonthlyPayments(prev => prev.map((mp, i) => 
-      i === index ? { ...mp, paid: !mp.paid } : mp
+  const toggleMonthPayment = async (index: number) => {
+    if (!params.id || !params.teamId || updatingPayment === index) return;
+    
+    const mp = monthlyPayments[index];
+    const newPaidStatus = !mp.paid;
+    
+    // Optimistically update UI
+    setMonthlyPayments(prev => prev.map((m, i) => 
+      i === index ? { ...m, paid: newPaidStatus } : m
     ));
+    setUpdatingPayment(index);
+
+    try {
+      const monthIndex = getMonthIndex(mp.month);
+      await updateRecurringPaymentStatus(
+        params.id,
+        params.teamId,
+        mp.year,
+        monthIndex,
+        newPaidStatus
+      );
+    } catch (error) {
+      console.error('Failed to update payment status:', error);
+      // Revert on error
+      setMonthlyPayments(prev => prev.map((m, i) => 
+        i === index ? { ...m, paid: !newPaidStatus } : m
+      ));
+      alert('Eroare la actualizarea statusului de plată. Încearcă din nou.');
+    } finally {
+      setUpdatingPayment(null);
+    }
   };
 
   const handleSave = async () => {
@@ -174,7 +235,7 @@ export default function RecurringExpenseDetailPage() {
         await deactivateRecurringExpense(params.id, params.teamId);
       }
       
-      router.push(`/dashboard/${params.teamId}/expenses`);
+      router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
     } catch (error) {
       console.error('Failed to save recurring expense:', error);
       alert('Eroare la salvare. Încearcă din nou.');
@@ -653,53 +714,57 @@ export default function RecurringExpenseDetailPage() {
             flexDirection: 'column',
             gap: '8px'
           }}>
-            {monthlyPayments.map((mp, index) => (
-              <div 
-                key={`${mp.month}-${mp.year}`}
-                onClick={() => toggleMonthPayment(index)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '10px 0',
-                  cursor: 'pointer',
-                  borderBottom: index < monthlyPayments.length - 1 ? '1px solid rgba(243, 244, 246, 1)' : 'none'
-                }}
-              >
-                <span style={{ 
-                  fontSize: '14px', 
-                  color: 'rgba(55, 65, 81, 1)',
-                  fontWeight: 400
-                }}>
-                  {mp.month} {mp.year}
-                </span>
-                {mp.paid ? (
-                  <div style={{
-                    width: '26px',
-                    height: '26px',
-                    borderRadius: '50%',
-                    backgroundColor: 'rgba(209, 250, 229, 1)',
+            {monthlyPayments.map((mp, index) => {
+              const isUpdating = updatingPayment === index;
+              return (
+                <div 
+                  key={`${mp.month}-${mp.year}`}
+                  onClick={() => !isUpdating && toggleMonthPayment(index)}
+                  style={{
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center'
+                    justifyContent: 'space-between',
+                    padding: '10px 0',
+                    cursor: isUpdating ? 'wait' : 'pointer',
+                    opacity: isUpdating ? 0.6 : 1,
+                    borderBottom: index < monthlyPayments.length - 1 ? '1px solid rgba(243, 244, 246, 1)' : 'none'
+                  }}
+                >
+                  <span style={{ 
+                    fontSize: '14px', 
+                    color: 'rgba(55, 65, 81, 1)',
+                    fontWeight: 400
                   }}>
-                    <Check size={14} style={{ color: 'rgba(5, 150, 105, 1)' }} />
-                  </div>
-                ) : (
-                  <div style={{
-                    width: '26px',
-                    height: '26px',
-                    borderRadius: '50%',
-                    backgroundColor: 'rgba(254, 226, 226, 1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}>
-                    <X size={14} style={{ color: 'rgba(220, 38, 38, 1)' }} />
-                  </div>
-                )}
-              </div>
-            ))}
+                    {mp.month} {mp.year}
+                  </span>
+                  {mp.paid ? (
+                    <div style={{
+                      width: '26px',
+                      height: '26px',
+                      borderRadius: '50%',
+                      backgroundColor: 'rgba(209, 250, 229, 1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <Check size={14} style={{ color: 'rgba(5, 150, 105, 1)' }} />
+                    </div>
+                  ) : (
+                    <div style={{
+                      width: '26px',
+                      height: '26px',
+                      borderRadius: '50%',
+                      backgroundColor: 'rgba(254, 226, 226, 1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <X size={14} style={{ color: 'rgba(220, 38, 38, 1)' }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 

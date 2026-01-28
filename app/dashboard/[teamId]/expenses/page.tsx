@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Check, X, ChevronDown, Calendar } from "lucide-react";
 import { getTeamExpenses, TeamExpense, ExpenseFilters } from "@/app/actions/expenses";
 import { 
@@ -365,11 +365,23 @@ interface FilterOption {
 export default function ExpensesPage() {
   const params = useParams<{ teamId: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [expenses, setExpenses] = useState<TeamExpense[]>([]);
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpenseWithPayments[]>([]);
   const [loading, setLoading] = useState(true);
   const [recurringLoading, setRecurringLoading] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState<TabType>('Cheltuieli');
+  
+  // Initialize tab from URL or default to 'Cheltuieli'
+  const initialTab = (searchParams.get('tab') as TabType) || 'Cheltuieli';
+  const [activeSubTab, setActiveSubTab] = useState<TabType>(initialTab);
+  
+  // Update tab when URL changes
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'Recurente' || tabParam === 'Cheltuieli') {
+      setActiveSubTab(tabParam);
+    }
+  }, [searchParams]);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchValue, setSearchValue] = useState('');
   const [selectedYear] = useState(new Date().getFullYear());
@@ -615,7 +627,10 @@ export default function ExpensesPage() {
             boxShadow: '0px 4px 6px -4px rgba(0, 0, 0, 0.07)'
           }}>
             <button 
-              onClick={() => setActiveSubTab('Cheltuieli')} 
+              onClick={() => {
+                setActiveSubTab('Cheltuieli');
+                router.push(`/dashboard/${params.teamId}/expenses?tab=Cheltuieli`);
+              }} 
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -647,7 +662,10 @@ export default function ExpensesPage() {
               Cheltuieli
             </button>
             <button 
-              onClick={() => setActiveSubTab('Recurente')} 
+              onClick={() => {
+                setActiveSubTab('Recurente');
+                router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
+              }} 
               style={{
                 display: 'flex',
                 alignItems: 'center',
