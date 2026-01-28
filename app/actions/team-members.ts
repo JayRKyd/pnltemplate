@@ -377,3 +377,63 @@ export async function getMyTeamRole(teamId: string): Promise<string | null> {
 
   return data?.role || null;
 }
+
+// Add a user to a team (Stack Auth + Supabase)
+export async function addUserToTeam(teamId: string, userId: string, role: string = "admin") {
+  console.log("[addUserToTeam] Adding", userId, "to team", teamId, "with role", role);
+
+  // Get ServerTeam directly for server-side operations
+  const team = await stackServerApp.getTeam(teamId);
+  if (!team) {
+    throw new Error("Team not found");
+  }
+
+  // Add to Stack Auth
+  const serverUser = await stackServerApp.getUser({ or: "throw" });
+  // Use the team's addUser method
+  try {
+    // Get the user by ID
+    const targetUser = await stackServerApp.getUser({ id: userId });
+    if (targetUser) {
+      // Check if user is already in team
+      const existingTeams = await targetUser.listTeams();
+      const alreadyInTeam = existingTeams.some(t => t.id === teamId);
+      
+      if (!alreadyInTeam) {
+        // Add user to team via Stack Auth
+        await team.addUser(userId);
+        console.log("[addUserToTeam] Added to Stack Auth team");
+      } else {
+        console.log("[addUserToTeam] User already in Stack Auth team");
+      }
+    }
+  } catch (err) {
+    console.error("[addUserToTeam] Stack Auth error:", err);
+    // Continue to sync Supabase even if Stack Auth fails
+  }
+
+  // Add to Supabase team_memberships
+  const { error: memberError } = await supabase
+    .from("team_memberships")
+    .upsert({
+      team_id: teamId,
+      user_id: userId,
+      role,
+    }, { onConflict: "team_id,user_id" });
+
+  if (memberError) {
+    console.error("[addUserToTeam] Supabase membership error:", memberError);
+  }
+
+  // Update user's default team in stack_users
+  const { error: userError } = await supabase
+    .from("stack_users")
+    .update({ team_id: teamId })
+    .eq("id", userId);
+
+  if (userError) {
+    console.error("[addUserToTeam] Supabase user error:", userError);
+  }
+
+  return { success: true };
+}
