@@ -18,8 +18,8 @@ const DOC_TYPES = ["Bon", "Factura", "eFactura", "Chitanta", "Altceva"];
 const PAYMENT_STATUS = ["Platit", "Neplatit"];
 const TVA_DEDUCTIBIL_OPTIONS = ["Nu", "Da"];
 
-// Date validation constants
-const MIN_DATE = new Date("2026-01-01");
+// Date validation constants - allow expenses from up to 5 years ago
+const MIN_DATE = new Date(new Date().getFullYear() - 5, 0, 1); // 5 years ago, January 1st
 
 // Max file size: 10MB
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -289,7 +289,7 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
       return { valid: false, error: "Data nu poate fi in viitor" };
     }
     if (date < MIN_DATE) {
-      return { valid: false, error: "Data trebuie sa fie dupa 1 ianuarie 2026" };
+      return { valid: false, error: `Data trebuie sa fie dupa 1 ianuarie ${MIN_DATE.getFullYear()}` };
     }
     return { valid: true };
   }, []);
