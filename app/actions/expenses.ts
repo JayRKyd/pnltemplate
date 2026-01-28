@@ -91,6 +91,25 @@ export interface ExpenseFilters {
   search?: string;
 }
 
+// Lightweight type for expense list view (optimized - smaller payload)
+export interface TeamExpenseListItem {
+  id: string;
+  expense_uid: string | null;
+  team_id: string;
+  amount: number;
+  amount_without_vat: number | null;
+  currency: string;
+  status: string;
+  payment_status: string;
+  supplier: string | null;
+  description: string | null;
+  category_id: string | null;
+  subcategory_id: string | null;
+  doc_type: string | null;
+  expense_date: string;
+  created_at: string;
+}
+
 // Fields needed for list view (optimized - smaller payload)
 const EXPENSE_LIST_FIELDS = `
   id,
@@ -115,7 +134,7 @@ const EXPENSE_LIST_FIELDS = `
 export async function getTeamExpenses(
   teamId: string,
   filters?: ExpenseFilters
-): Promise<TeamExpense[]> {
+): Promise<TeamExpenseListItem[]> {
   let query = supabase
     .from("team_expenses")
     .select(EXPENSE_LIST_FIELDS)

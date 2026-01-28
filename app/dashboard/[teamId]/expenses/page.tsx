@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Check, X, ChevronDown, Calendar } from "lucide-react";
-import { getTeamExpenses, TeamExpense, ExpenseFilters } from "@/app/actions/expenses";
+import { getTeamExpenses, TeamExpenseListItem, ExpenseFilters } from "@/app/actions/expenses";
 import { 
   getRecurringExpensesWithPayments, 
   RecurringExpenseWithPayments,
@@ -366,7 +366,7 @@ export default function ExpensesPage() {
   const params = useParams<{ teamId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [expenses, setExpenses] = useState<TeamExpense[]>([]);
+  const [expenses, setExpenses] = useState<TeamExpenseListItem[]>([]);
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpenseWithPayments[]>([]);
   const [loading, setLoading] = useState(true);
   const [recurringLoading, setRecurringLoading] = useState(true);
