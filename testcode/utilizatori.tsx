@@ -5,6 +5,7 @@ import { X, Check, User, RefreshCcw, Ban, Loader2 } from 'lucide-react';
 import { 
   getTeamMembers, 
   setMemberActiveStatus,
+  createTeamInvite,
   TeamMemberWithProfile 
 } from '@/app/actions/team-members';
 
@@ -188,6 +189,12 @@ export function Utilizatori({ onClose, teamId }: UtilizatoriProps) {
   const [allUsers, setAllUsers] = useState<UserType[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('member');
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
 
   // Load team members
   const loadMembers = useCallback(async () => {
@@ -241,6 +248,32 @@ export function Utilizatori({ onClose, teamId }: UtilizatoriProps) {
       console.error('Failed to deactivate user:', error);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  // Handle invite submission
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim() || !teamId) return;
+
+    try {
+      setInviteLoading(true);
+      setInviteError(null);
+      setInviteSuccess(null);
+      await createTeamInvite(teamId, inviteEmail.trim(), inviteRole);
+      setInviteSuccess(`Invitatie trimisa catre ${inviteEmail}`);
+      setInviteEmail('');
+      setInviteRole('member');
+      // Auto-hide success after 3 seconds
+      setTimeout(() => {
+        setInviteSuccess(null);
+        setShowInviteForm(false);
+      }, 2000);
+    } catch (error: any) {
+      console.error('Failed to send invite:', error);
+      setInviteError(error.message || 'Nu s-a putut trimite invitatia');
+    } finally {
+      setInviteLoading(false);
     }
   };
 
@@ -455,12 +488,74 @@ export function Utilizatori({ onClose, teamId }: UtilizatoriProps) {
         </div>
       </div>
 
-      {/* Footer with Add Button */}
+      {/* Footer with Add Button / Invite Form */}
       {activeTab === 'activi' && (
-        <div className="px-8 py-6 flex justify-center border-t border-gray-100">
-          <button className="px-8 py-3 bg-teal-500 hover:bg-teal-600 text-white font-medium rounded-full transition-colors shadow-sm">
-            Adauga coleg
-          </button>
+        <div className="px-8 py-6 border-t border-gray-100">
+          {!showInviteForm ? (
+            <div className="flex justify-center">
+              <button 
+                onClick={() => setShowInviteForm(true)}
+                className="px-8 py-3 bg-teal-500 hover:bg-teal-600 text-white font-medium rounded-full transition-colors shadow-sm"
+              >
+                Adauga coleg
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleInvite} className="space-y-4">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="Email coleg"
+                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  required
+                  disabled={inviteLoading}
+                />
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value)}
+                  className="px-4 py-2.5 border border-gray-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white"
+                  disabled={inviteLoading}
+                >
+                  <option value="admin">Admin</option>
+                  <option value="member">Editor</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </div>
+              
+              {inviteError && (
+                <p className="text-red-500 text-sm text-center">{inviteError}</p>
+              )}
+              {inviteSuccess && (
+                <p className="text-green-500 text-sm text-center">{inviteSuccess}</p>
+              )}
+              
+              <div className="flex justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowInviteForm(false);
+                    setInviteEmail('');
+                    setInviteError(null);
+                    setInviteSuccess(null);
+                  }}
+                  disabled={inviteLoading}
+                  className="px-6 py-2.5 border border-gray-200 rounded-full text-gray-700 font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  Anuleaza
+                </button>
+                <button
+                  type="submit"
+                  disabled={inviteLoading || !inviteEmail.trim()}
+                  className="px-6 py-2.5 bg-teal-500 hover:bg-teal-600 text-white font-medium rounded-full transition-colors shadow-sm disabled:opacity-50 flex items-center gap-2"
+                >
+                  {inviteLoading && <Loader2 size={16} className="animate-spin" />}
+                  Trimite invitatie
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       )}
     </div>
