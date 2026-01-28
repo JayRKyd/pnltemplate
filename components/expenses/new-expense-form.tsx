@@ -1494,7 +1494,9 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
           {/* Right Side Document Preview */}
           <div style={{
             width: '740px',
-            minHeight: '562px',
+            height: 'calc(100vh - 200px)',
+            maxHeight: '800px',
+            minHeight: '500px',
             backgroundColor: 'rgba(255, 255, 255, 0.7)',
             border: '1px solid rgba(229, 231, 235, 0.3)',
             borderRadius: '16px',
@@ -1503,7 +1505,8 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
             boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
             position: 'sticky',
             top: '100px',
-            flexShrink: 0
+            flexShrink: 0,
+            overflow: 'hidden'
           }}>
             {uploadedFiles.length > 0 ? (
               <>
@@ -1563,37 +1566,40 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                   </div>
                 )}
 
-                {/* Preview Area - expands to fit document */}
+                {/* Preview Area - fits within card */}
                 <div style={{ 
                   flex: 1, 
                   position: 'relative',
+                  overflow: imageZoom > 1 ? 'auto' : 'hidden',
                   padding: uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? '60px 16px 16px 16px' : '0'
                 }}>
                   {/* Preview Image/PDF */}
                   {uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? (
                     <div style={{
-                      minWidth: imageZoom > 1 ? `${700 * imageZoom}px` : '100%',
-                      minHeight: imageZoom > 1 ? 'auto' : '100%',
+                      width: imageZoom > 1 ? `${700 * imageZoom}px` : '100%',
+                      height: imageZoom > 1 ? 'auto' : '100%',
                       display: 'flex',
-                      justifyContent: imageZoom > 1 ? 'flex-start' : 'center',
-                      alignItems: imageZoom > 1 ? 'flex-start' : 'center'
+                      justifyContent: 'center',
+                      alignItems: 'center'
                     }}>
                       <img 
                         src={uploadedFiles[activePreviewIndex].preview} 
                         alt="Document preview" 
                         style={{ 
-                          width: imageZoom === 1 ? '100%' : `${700 * imageZoom}px`,
+                          maxWidth: imageZoom === 1 ? '100%' : `${700 * imageZoom}px`,
+                          maxHeight: imageZoom === 1 ? '100%' : 'none',
+                          width: imageZoom > 1 ? `${700 * imageZoom}px` : 'auto',
                           height: 'auto',
                           objectFit: 'contain',
                           cursor: imageZoom > 1 ? 'grab' : 'default',
-                          transition: 'width 0.2s ease'
+                          transition: 'all 0.2s ease'
                         }} 
                       />
                     </div>
                   ) : (
                     <iframe 
                       src={uploadedFiles[activePreviewIndex].preview} 
-                      style={{ width: '100%', height: '2000px', border: 'none' }}
+                      style={{ width: '100%', height: '100%', border: 'none' }}
                       title="Document preview"
                     />
                   )}
