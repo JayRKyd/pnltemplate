@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Check, X, Hourglass } from "lucide-react";
+import { Check, X, ChevronDown, Calendar } from "lucide-react";
 import { getTeamExpenses, TeamExpense, ExpenseFilters } from "@/app/actions/expenses";
 import { 
   getRecurringExpensesWithPayments, 
   RecurringExpenseWithPayments,
   updateRecurringPaymentStatus 
 } from "@/app/actions/recurring-expenses";
+import { getTeamCategories, ExpenseCategory } from "@/app/actions/categories";
 
 type TabType = 'Cheltuieli' | 'Recurente';
 
@@ -166,44 +167,6 @@ const mockTableData = [
   },
 ];
 
-// Fallback mock data for recurring expenses (used when no real data)
-const mockRecurringExpenses = [
-  { 
-    id: '1', 
-    furnizor: 'Adobe Systems Software', 
-    descriere: 'Creative Cloud All Apps - 15 users', 
-    suma: 1259.00,
-    payments: { jul: true, aug: true, sep: true, oct: true, nov: true, dec: true }
-  },
-  { 
-    id: '2', 
-    furnizor: 'Slack Technologies LLC', 
-    descriere: 'Slack Business+ - 45 users', 
-    suma: 1750.00,
-    payments: { jul: true, aug: true, sep: true, oct: true, nov: true, dec: true }
-  },
-  { 
-    id: '3', 
-    furnizor: 'Google Ireland Limited', 
-    descriere: 'Google Workspace Business - 50 users', 
-    suma: 3850.00,
-    payments: { jul: false, aug: false, sep: true, oct: true, nov: true, dec: true }
-  },
-  { 
-    id: '4', 
-    furnizor: 'Zoom Video Communications', 
-    descriere: 'Zoom Business - 20 host licenses', 
-    suma: 1890.00,
-    payments: { jul: true, aug: true, sep: true, oct: false, nov: true, dec: true }
-  },
-  { 
-    id: '5', 
-    furnizor: 'AWS Europe SARL', 
-    descriere: 'Cloud hosting & storage infrastructure', 
-    suma: 2200.00,
-    payments: { jul: true, aug: true, sep: true, oct: true, nov: false, dec: true }
-  },
-];
 
 const getStatusStyles = (status: string) => {
   switch (status) {
@@ -393,6 +356,12 @@ function PaymentStatusModal({ isOpen, onClose, onConfirm, supplierName, amount, 
   );
 }
 
+// Filter dropdown option types
+interface FilterOption {
+  value: string;
+  label: string;
+}
+
 export default function ExpensesPage() {
   const params = useParams<{ teamId: string }>();
   const router = useRouter();
@@ -419,9 +388,59 @@ export default function ExpensesPage() {
     monthIndex: number;
     currentlyPaid: boolean;
   } | null>(null);
+
+  // Filter states
+  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [selectedPayment, setSelectedPayment] = useState<string>('');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
   
-  const itemsPerPage = 15;
-  const totalItems = 100; // Mock total
+  // Dropdown open states
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const dropdownRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+  
+  const itemsPerPage = 20;
+
+  // Status options
+  const statusOptions: FilterOption[] = [
+    { value: '', label: 'Toate' },
+    { value: 'draft', label: 'Draft' },
+    { value: 'pending', label: 'In asteptare' },
+    { value: 'approved', label: 'Aprobat' },
+    { value: 'rejected', label: 'Respins' },
+    { value: 'paid', label: 'Platit' },
+  ];
+
+  // Payment options
+  const paymentOptions: FilterOption[] = [
+    { value: '', label: 'Toate' },
+    { value: 'paid', label: 'Platit' },
+    { value: 'unpaid', label: 'Neplatit' },
+  ];
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (openDropdown) {
+        const ref = dropdownRefs.current[openDropdown];
+        if (ref && !ref.contains(event.target as Node)) {
+          setOpenDropdown(null);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openDropdown]);
+
+  // Fetch categories on mount
+  useEffect(() => {
+    if (params.teamId) {
+      getTeamCategories(params.teamId).then(setCategories).catch(console.error);
+    }
+  }, [params.teamId]);
 
   const loadExpenses = useCallback(async () => {
     if (!params.teamId) return;
@@ -430,15 +449,28 @@ export default function ExpensesPage() {
     try {
       const filters: ExpenseFilters = {};
       if (searchValue) filters.search = searchValue;
+      if (selectedCategory) filters.categoryId = selectedCategory;
+      if (selectedStatus) filters.status = selectedStatus;
+      if (dateFrom) filters.dateFrom = dateFrom;
+      if (dateTo) filters.dateTo = dateTo;
 
       const data = await getTeamExpenses(params.teamId, filters);
-      setExpenses(data);
+      
+      // Apply payment filter client-side (since backend filters by status, not payment_status)
+      let filteredData = data;
+      if (selectedPayment === 'paid') {
+        filteredData = data.filter(exp => exp.payment_status === 'paid');
+      } else if (selectedPayment === 'unpaid') {
+        filteredData = data.filter(exp => exp.payment_status !== 'paid');
+      }
+      
+      setExpenses(filteredData);
     } catch (err) {
       console.error("Failed to fetch expenses:", err);
     } finally {
       setLoading(false);
     }
-  }, [params.teamId, searchValue]);
+  }, [params.teamId, searchValue, selectedCategory, selectedStatus, selectedPayment, dateFrom, dateTo]);
 
   const loadRecurringExpenses = useCallback(async () => {
     if (!params.teamId) return;
@@ -493,6 +525,20 @@ export default function ExpensesPage() {
         id: exp.id
       }))
     : mockTableData;
+
+  // Pagination calculations
+  const totalItems = displayData.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedData = displayData.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change and current page is out of bounds
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(1);
+    }
+  }, [currentPage, totalPages]);
 
   function formatExpenseDate(dateStr: string | null): string {
     if (!dateStr) return '-';
@@ -666,44 +712,331 @@ export default function ExpensesPage() {
           marginBottom: '24px',
           alignItems: 'center'
         }}>
-          {/* Different filters based on active tab */}
-          {(activeSubTab === 'Cheltuieli' 
-            ? ['Categorie', 'Cont', 'Data', 'Status', 'Plata'] 
-            : ['Categorie', 'Cont', 'Data']
-          ).map((filter, idx) => (
+          {/* Category Filter */}
+          <div 
+            ref={(el) => { dropdownRefs.current['category'] = el; }}
+            style={{ position: 'relative' }}
+          >
             <button 
-              key={filter} 
+              onClick={() => setOpenDropdown(openDropdown === 'category' ? null : 'category')}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
                 padding: '0 25px',
                 height: '40.5px',
-                backgroundColor: 'rgba(255, 255, 255, 0.7)',
-                border: '1px solid rgba(209, 213, 220, 0.5)',
+                backgroundColor: selectedCategory ? 'rgba(30, 172, 200, 0.1)' : 'rgba(255, 255, 255, 0.7)',
+                border: selectedCategory ? '1px solid rgba(30, 172, 200, 0.5)' : '1px solid rgba(209, 213, 220, 0.5)',
                 borderRadius: '9999px',
                 cursor: 'pointer',
-                color: 'rgba(153, 161, 175, 1)',
+                color: selectedCategory ? 'rgba(30, 172, 200, 1)' : 'rgba(153, 161, 175, 1)',
                 fontSize: '15px',
-                boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
-                opacity: activeSubTab === 'Recurente' && filter === 'Cont' ? 0.4 : 1
+                boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)'
               }}
             >
-              {filter}
-              {filter === 'Data' ? (
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="2" y="3" width="12" height="11" rx="2" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.2"/>
-                  <path d="M2 6H14" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.2"/>
-                  <path d="M5 1V4" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.2" strokeLinecap="round"/>
-                  <path d="M11 1V4" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.2" strokeLinecap="round"/>
-                </svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M4 6L8 10L12 6" stroke="rgba(153, 161, 175, 1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              )}
+              {selectedCategory ? categories.find(c => c.id === selectedCategory)?.name || 'Categorie' : 'Categorie'}
+              <ChevronDown size={16} />
             </button>
-          ))}
+            {openDropdown === 'category' && (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                marginTop: '4px',
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                boxShadow: '0px 10px 30px rgba(0, 0, 0, 0.15)',
+                border: '1px solid rgba(229, 231, 235, 0.5)',
+                minWidth: '200px',
+                maxHeight: '300px',
+                overflowY: 'auto',
+                zIndex: 100
+              }}>
+                <div
+                  onClick={() => { setSelectedCategory(''); setOpenDropdown(null); }}
+                  style={{
+                    padding: '12px 16px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    color: !selectedCategory ? 'rgba(30, 172, 200, 1)' : 'rgba(55, 65, 81, 1)',
+                    backgroundColor: !selectedCategory ? 'rgba(30, 172, 200, 0.05)' : 'transparent',
+                    borderBottom: '1px solid rgba(229, 231, 235, 0.5)'
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(30, 172, 200, 0.05)')}
+                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = !selectedCategory ? 'rgba(30, 172, 200, 0.05)' : 'transparent')}
+                >
+                  Toate
+                </div>
+                {categories.filter(c => !c.parent_id).map(cat => (
+                  <div
+                    key={cat.id}
+                    onClick={() => { setSelectedCategory(cat.id); setOpenDropdown(null); }}
+                    style={{
+                      padding: '12px 16px',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      color: selectedCategory === cat.id ? 'rgba(30, 172, 200, 1)' : 'rgba(55, 65, 81, 1)',
+                      backgroundColor: selectedCategory === cat.id ? 'rgba(30, 172, 200, 0.05)' : 'transparent'
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(30, 172, 200, 0.05)')}
+                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = selectedCategory === cat.id ? 'rgba(30, 172, 200, 0.05)' : 'transparent')}
+                  >
+                    {cat.name}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Cont Filter - placeholder for now */}
+          <button 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '0 25px',
+              height: '40.5px',
+              backgroundColor: 'rgba(255, 255, 255, 0.7)',
+              border: '1px solid rgba(209, 213, 220, 0.5)',
+              borderRadius: '9999px',
+              cursor: 'not-allowed',
+              color: 'rgba(153, 161, 175, 1)',
+              fontSize: '15px',
+              boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
+              opacity: 0.4
+            }}
+          >
+            Cont
+            <ChevronDown size={16} />
+          </button>
+
+          {/* Date Filter */}
+          <div 
+            ref={(el) => { dropdownRefs.current['date'] = el; }}
+            style={{ position: 'relative' }}
+          >
+            <button 
+              onClick={() => setOpenDropdown(openDropdown === 'date' ? null : 'date')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '0 25px',
+                height: '40.5px',
+                backgroundColor: (dateFrom || dateTo) ? 'rgba(30, 172, 200, 0.1)' : 'rgba(255, 255, 255, 0.7)',
+                border: (dateFrom || dateTo) ? '1px solid rgba(30, 172, 200, 0.5)' : '1px solid rgba(209, 213, 220, 0.5)',
+                borderRadius: '9999px',
+                cursor: 'pointer',
+                color: (dateFrom || dateTo) ? 'rgba(30, 172, 200, 1)' : 'rgba(153, 161, 175, 1)',
+                fontSize: '15px',
+                boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)'
+              }}
+            >
+              Data
+              <Calendar size={16} />
+            </button>
+            {openDropdown === 'date' && (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                marginTop: '4px',
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                boxShadow: '0px 10px 30px rgba(0, 0, 0, 0.15)',
+                border: '1px solid rgba(229, 231, 235, 0.5)',
+                padding: '16px',
+                zIndex: 100,
+                minWidth: '280px'
+              }}>
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', color: 'rgba(107, 114, 128, 1)', marginBottom: '4px' }}>De la</label>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={e => setDateFrom(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      border: '1px solid rgba(209, 213, 220, 1)',
+                      borderRadius: '8px',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', color: 'rgba(107, 114, 128, 1)', marginBottom: '4px' }}>Pana la</label>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={e => setDateTo(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      border: '1px solid rgba(209, 213, 220, 1)',
+                      borderRadius: '8px',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={() => { setDateFrom(''); setDateTo(''); }}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      border: '1px solid rgba(209, 213, 220, 1)',
+                      borderRadius: '8px',
+                      backgroundColor: 'white',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      color: 'rgba(55, 65, 81, 1)'
+                    }}
+                  >
+                    Reseteaza
+                  </button>
+                  <button
+                    onClick={() => setOpenDropdown(null)}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      border: 'none',
+                      borderRadius: '8px',
+                      background: 'linear-gradient(180deg, rgba(0, 212, 146, 1) 0%, rgba(81, 162, 255, 1) 100%)',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      color: 'white',
+                      fontWeight: 500
+                    }}
+                  >
+                    Aplica
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Status Filter - only for Cheltuieli tab */}
+          {activeSubTab === 'Cheltuieli' && (
+            <div 
+              ref={(el) => { dropdownRefs.current['status'] = el; }}
+              style={{ position: 'relative' }}
+            >
+              <button 
+                onClick={() => setOpenDropdown(openDropdown === 'status' ? null : 'status')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '0 25px',
+                  height: '40.5px',
+                  backgroundColor: selectedStatus ? 'rgba(30, 172, 200, 0.1)' : 'rgba(255, 255, 255, 0.7)',
+                  border: selectedStatus ? '1px solid rgba(30, 172, 200, 0.5)' : '1px solid rgba(209, 213, 220, 0.5)',
+                  borderRadius: '9999px',
+                  cursor: 'pointer',
+                  color: selectedStatus ? 'rgba(30, 172, 200, 1)' : 'rgba(153, 161, 175, 1)',
+                  fontSize: '15px',
+                  boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)'
+                }}
+              >
+                {selectedStatus ? statusOptions.find(o => o.value === selectedStatus)?.label || 'Status' : 'Status'}
+                <ChevronDown size={16} />
+              </button>
+              {openDropdown === 'status' && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: '4px',
+                  backgroundColor: 'white',
+                  borderRadius: '12px',
+                  boxShadow: '0px 10px 30px rgba(0, 0, 0, 0.15)',
+                  border: '1px solid rgba(229, 231, 235, 0.5)',
+                  minWidth: '160px',
+                  zIndex: 100
+                }}>
+                  {statusOptions.map(option => (
+                    <div
+                      key={option.value}
+                      onClick={() => { setSelectedStatus(option.value); setOpenDropdown(null); }}
+                      style={{
+                        padding: '12px 16px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        color: selectedStatus === option.value ? 'rgba(30, 172, 200, 1)' : 'rgba(55, 65, 81, 1)',
+                        backgroundColor: selectedStatus === option.value ? 'rgba(30, 172, 200, 0.05)' : 'transparent'
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(30, 172, 200, 0.05)')}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = selectedStatus === option.value ? 'rgba(30, 172, 200, 0.05)' : 'transparent')}
+                    >
+                      {option.label}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Payment Filter - only for Cheltuieli tab */}
+          {activeSubTab === 'Cheltuieli' && (
+            <div 
+              ref={(el) => { dropdownRefs.current['payment'] = el; }}
+              style={{ position: 'relative' }}
+            >
+              <button 
+                onClick={() => setOpenDropdown(openDropdown === 'payment' ? null : 'payment')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '0 25px',
+                  height: '40.5px',
+                  backgroundColor: selectedPayment ? 'rgba(30, 172, 200, 0.1)' : 'rgba(255, 255, 255, 0.7)',
+                  border: selectedPayment ? '1px solid rgba(30, 172, 200, 0.5)' : '1px solid rgba(209, 213, 220, 0.5)',
+                  borderRadius: '9999px',
+                  cursor: 'pointer',
+                  color: selectedPayment ? 'rgba(30, 172, 200, 1)' : 'rgba(153, 161, 175, 1)',
+                  fontSize: '15px',
+                  boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)'
+                }}
+              >
+                {selectedPayment ? paymentOptions.find(o => o.value === selectedPayment)?.label || 'Plata' : 'Plata'}
+                <ChevronDown size={16} />
+              </button>
+              {openDropdown === 'payment' && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: '4px',
+                  backgroundColor: 'white',
+                  borderRadius: '12px',
+                  boxShadow: '0px 10px 30px rgba(0, 0, 0, 0.15)',
+                  border: '1px solid rgba(229, 231, 235, 0.5)',
+                  minWidth: '140px',
+                  zIndex: 100
+                }}>
+                  {paymentOptions.map(option => (
+                    <div
+                      key={option.value}
+                      onClick={() => { setSelectedPayment(option.value); setOpenDropdown(null); }}
+                      style={{
+                        padding: '12px 16px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        color: selectedPayment === option.value ? 'rgba(30, 172, 200, 1)' : 'rgba(55, 65, 81, 1)',
+                        backgroundColor: selectedPayment === option.value ? 'rgba(30, 172, 200, 0.05)' : 'transparent'
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(30, 172, 200, 0.05)')}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = selectedPayment === option.value ? 'rgba(30, 172, 200, 0.05)' : 'transparent')}
+                    >
+                      {option.label}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           
           <div style={{
             marginLeft: 'auto',
@@ -791,7 +1124,7 @@ export default function ExpensesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {displayData.map((row, index) => (
+                  {paginatedData.map((row, index) => (
                     <tr 
                       key={index} 
                       style={{
@@ -942,7 +1275,7 @@ export default function ExpensesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(recurringExpenses.length > 0 ? recurringExpenses.map((expense) => {
+                  {recurringExpenses.length > 0 ? recurringExpenses.map((expense) => {
                     const amount = expense.amount_with_vat || expense.amount || 0;
                     const amountParts = formatDisplayAmount(amount).split(',');
                     const mainAmount = amountParts[0] + ',';
@@ -994,7 +1327,7 @@ export default function ExpensesPage() {
                         {monthKeys.map((monthKey, idx) => (
                           <td key={monthKey} style={{ width: '81.8px' }}>
                             <div 
-                              style={{ display: 'flex', justifyContent: 'center' }}
+                              style={{ display: 'flex', justifyContent: 'center', cursor: 'pointer' }}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setRecurringPaymentModal({
@@ -1013,84 +1346,13 @@ export default function ExpensesPage() {
                         ))}
                       </tr>
                     );
-                  }) : mockRecurringExpenses.map((expense) => {
-                    const amountParts = formatDisplayAmount(expense.suma).split(',');
-                    const mainAmount = amountParts[0] + ',';
-                    const decimals = amountParts[1] || '00';
-                    
-                    return (
-                      <tr 
-                        key={expense.id} 
-                        style={{
-                          height: '65px',
-                          borderBottom: '1px solid rgba(229, 231, 235, 0.3)',
-                          cursor: 'pointer',
-                          transition: 'background-color 0.2s'
-                        }}
-                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(44, 173, 189, 0.02)')}
-                        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                      >
-                        <td style={{ 
-                          width: '379.2px',
-                          paddingLeft: '24px', 
-                          fontSize: '15px', 
-                          fontWeight: 500, 
-                          color: 'rgba(16, 24, 40, 1)' 
-                        }}>
-                          {expense.furnizor}
-                        </td>
-                        <td style={{ 
-                          width: '452px',
-                          paddingLeft: '24px', 
-                          fontSize: '14px', 
-                          fontWeight: 400, 
-                          color: 'rgba(54, 65, 83, 1)' 
-                        }}>
-                          {expense.descriere}
-                        </td>
-                        <td style={{ width: '162.7px', textAlign: 'center' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: '1px' }}>
-                            <span style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(10, 10, 10, 1)' }}>
-                              {mainAmount}
-                            </span>
-                            <span style={{ fontSize: '13px', fontWeight: 500, color: 'rgba(10, 10, 10, 1)' }}>
-                              {decimals}
-                            </span>
-                          </div>
-                        </td>
-                        <td style={{ width: '81.8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center' }}>
-                            <MonthPaymentIcon paid={expense.payments.jul} />
-                          </div>
-                        </td>
-                        <td style={{ width: '81.8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center' }}>
-                            <MonthPaymentIcon paid={expense.payments.aug} />
-                          </div>
-                        </td>
-                        <td style={{ width: '81.8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center' }}>
-                            <MonthPaymentIcon paid={expense.payments.sep} />
-                          </div>
-                        </td>
-                        <td style={{ width: '81.8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center' }}>
-                            <MonthPaymentIcon paid={expense.payments.oct} />
-                          </div>
-                        </td>
-                        <td style={{ width: '81.8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center' }}>
-                            <MonthPaymentIcon paid={expense.payments.nov} />
-                          </div>
-                        </td>
-                        <td style={{ width: '81.8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center' }}>
-                            <MonthPaymentIcon paid={expense.payments.dec} />
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  }))}
+                  }) : (
+                    <tr>
+                      <td colSpan={9} style={{ padding: '48px', textAlign: 'center', color: 'rgba(107, 114, 128, 1)' }}>
+                        Nu exista cheltuieli recurente. Apasa &quot;Recurent Nou +&quot; pentru a adauga.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             )}
@@ -1202,73 +1464,88 @@ export default function ExpensesPage() {
         }}>
           <span style={{ fontSize: '14px', color: 'rgba(0, 0, 0, 1)' }}>
             Showing {activeSubTab === 'Recurente' 
-              ? (recurringExpenses.length > 0 ? recurringExpenses.length : mockRecurringExpenses.length) 
-              : displayData.length} of {activeSubTab === 'Recurente' 
-              ? (recurringExpenses.length > 0 ? recurringExpenses.length : mockRecurringExpenses.length) 
+              ? recurringExpenses.length 
+              : `${Math.min(startIndex + 1, totalItems)}-${Math.min(endIndex, totalItems)}`} of {activeSubTab === 'Recurente' 
+              ? recurringExpenses.length 
               : totalItems} results
           </span>
           
-          <div style={{ display: 'flex', gap: '7px' }}>
-            <button 
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              style={{
-                width: '56px',
-                height: '36px',
-                backgroundColor: 'white',
-                border: 'none',
-                borderRadius: '28px',
-                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: currentPage === 1 ? 0.5 : 1
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12.5 15L7.5 10L12.5 5" stroke="rgba(107, 114, 128, 1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-            {[1, 2, 3, 4, 5].map(page => (
+          {activeSubTab === 'Cheltuieli' && totalPages > 1 && (
+            <div style={{ display: 'flex', gap: '7px' }}>
               <button 
-                key={page} 
-                onClick={() => setCurrentPage(page)} 
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
                 style={{
                   width: '56px',
                   height: '36px',
+                  backgroundColor: 'white',
                   border: 'none',
                   borderRadius: '28px',
-                  cursor: 'pointer',
-                  backgroundColor: currentPage === page ? 'rgba(34, 211, 238, 1)' : 'rgba(225, 244, 245, 1)',
-                  color: currentPage === page ? 'white' : 'rgba(23, 26, 28, 0.4)',
-                  fontSize: '14px',
-                  fontWeight: 500
+                  cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: currentPage === 1 ? 0.5 : 1
                 }}
               >
-                {page}
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12.5 15L7.5 10L12.5 5" stroke="rgba(107, 114, 128, 1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
               </button>
-            ))}
-            <button 
-              onClick={() => setCurrentPage(Math.min(5, currentPage + 1))}
-              disabled={currentPage === 5}
-              style={{
-                width: '56px',
-                height: '36px',
-                backgroundColor: 'white',
-                border: 'none',
-                borderRadius: '28px',
-                cursor: currentPage === 5 ? 'not-allowed' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: currentPage === 5 ? 0.5 : 1
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M7.5 15L12.5 10L7.5 5" stroke="rgba(107, 114, 128, 1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-          </div>
+              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                // Show pages around current page
+                let pageNum: number;
+                if (totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (currentPage <= 3) {
+                  pageNum = i + 1;
+                } else if (currentPage >= totalPages - 2) {
+                  pageNum = totalPages - 4 + i;
+                } else {
+                  pageNum = currentPage - 2 + i;
+                }
+                return (
+                  <button 
+                    key={pageNum} 
+                    onClick={() => setCurrentPage(pageNum)} 
+                    style={{
+                      width: '56px',
+                      height: '36px',
+                      border: 'none',
+                      borderRadius: '28px',
+                      cursor: 'pointer',
+                      backgroundColor: currentPage === pageNum ? 'rgba(34, 211, 238, 1)' : 'rgba(225, 244, 245, 1)',
+                      color: currentPage === pageNum ? 'white' : 'rgba(23, 26, 28, 0.4)',
+                      fontSize: '14px',
+                      fontWeight: 500
+                    }}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+              <button 
+                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                disabled={currentPage === totalPages}
+                style={{
+                  width: '56px',
+                  height: '36px',
+                  backgroundColor: 'white',
+                  border: 'none',
+                  borderRadius: '28px',
+                  cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: currentPage === totalPages ? 0.5 : 1
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M7.5 15L12.5 10L7.5 5" stroke="rgba(107, 114, 128, 1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

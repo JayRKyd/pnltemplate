@@ -3,8 +3,8 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { X, Upload, ChevronDown, Plus, Check, AlertTriangle, Loader2 } from "lucide-react";
-import { createExpense, createMultiLineExpense, submitForApproval, ExpenseInput, ExpenseLineInput } from "@/app/actions/expenses";
-import { uploadAttachment } from "@/app/actions/attachments";
+import { createExpense, createMultiLineExpense, updateExpense, getExpense, submitForApproval, ExpenseInput, ExpenseLineInput, TeamExpense } from "@/app/actions/expenses";
+import { uploadAttachment, getExpenseAttachments, getAttachmentUrl } from "@/app/actions/attachments";
 import { CalendarModal } from "@/components/ui/calendar-modal";
 import { getCategoryTree, CategoryWithChildren } from "@/app/actions/categories";
 import { searchSuppliers, SupplierSearchResult } from "@/app/actions/suppliers";
@@ -18,8 +18,7 @@ const DOC_TYPES = ["Bon", "Factura", "eFactura", "Chitanta", "Altceva"];
 const PAYMENT_STATUS = ["Platit", "Neplatit"];
 const TVA_DEDUCTIBIL_OPTIONS = ["Nu", "Da"];
 
-// Date validation constants - allow expenses from up to 5 years ago
-const MIN_DATE = new Date(new Date().getFullYear() - 5, 0, 1); // 5 years ago, January 1st
+// No date restrictions - fully open calendar
 
 // Max file size: 10MB
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -44,6 +43,7 @@ interface TransactionLine {
 
 interface Props {
   teamId: string;
+  expenseId?: string; // If provided, load existing expense for editing
   onBack?: () => void;
 }
 
@@ -125,6 +125,21 @@ function convertToAccountingPeriod(lunaP: string): string {
   return month && year ? `${year}-${month}` : "";
 }
 
+// Convert "2025-11" back to "noiembrie 2025" for display
+function convertFromAccountingPeriod(accountingPeriod: string | null, defaultMonthYear: string): string {
+  if (!accountingPeriod) return defaultMonthYear;
+  const monthMap: Record<string, string> = {
+    "01": "ianuarie", "02": "februarie", "03": "martie", "04": "aprilie",
+    "05": "mai", "06": "iunie", "07": "iulie", "08": "august",
+    "09": "septembrie", "10": "octombrie", "11": "noiembrie", "12": "decembrie",
+  };
+  const parts = accountingPeriod.split("-");
+  if (parts.length !== 2) return defaultMonthYear;
+  const year = parts[0];
+  const month = monthMap[parts[1]] || "";
+  return month && year ? `${month} ${year}` : defaultMonthYear;
+}
+
 // Reusable Text Input Component matching Figma
 const TextInput = ({
   style,
@@ -151,9 +166,10 @@ const TextInput = ({
   />
 );
 
-export function NewExpenseForm({ teamId, onBack }: Props) {
+export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [loadingExpense, setLoadingExpense] = useState(!!expenseId);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Header fields
@@ -166,7 +182,7 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
   const [plata, setPlata] = useState("Neplatit");
   
   // Document upload
-  const [uploadedFiles, setUploadedFiles] = useState<{ name: string; preview: string; type: string; size: number }[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<{ name: string; preview: string; type: string; size: number; isExisting?: boolean }[]>([]);
   const [activePreviewIndex, setActivePreviewIndex] = useState(0);
   const [imageZoom, setImageZoom] = useState(1);
   
@@ -263,6 +279,79 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     loadCategories();
   }, [teamId]);
 
+  // Load existing expense data if editing
+  useEffect(() => {
+    async function loadExpense() {
+      if (!expenseId) return;
+      
+      setLoadingExpense(true);
+      try {
+        const expense = await getExpense(expenseId);
+        if (!expense) {
+          console.error("Expense not found");
+          return;
+        }
+
+        // Load attachments
+        const attachments = await getExpenseAttachments(expenseId);
+        const attachmentFiles = await Promise.all(
+          attachments.map(async (att) => {
+            const url = await getAttachmentUrl(att.file_path);
+            const response = await fetch(url);
+            const blob = await response.blob();
+            const base64 = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(blob);
+            });
+            return {
+              name: att.file_name,
+              preview: base64,
+              type: att.file_type || 'image/png',
+              size: att.file_size || 0,
+              isExisting: true // Mark as existing attachment
+            };
+          })
+        );
+        setUploadedFiles(attachmentFiles);
+
+        // Populate header fields
+        setFurnizor(expense.supplier || "");
+        setFurnizorCui(expense.supplier_cui || "");
+        setFurnizorLocked(!!expense.supplier);
+        setDocType(expense.doc_type ? expense.doc_type.charAt(0).toUpperCase() + expense.doc_type.slice(1) : "Factura");
+        setNrDoc(expense.doc_number || "");
+        setSelectedDate(new Date(expense.expense_date));
+        setPlata(expense.payment_status === "paid" ? "Platit" : "Neplatit");
+
+        // Populate line data
+        const defaultMonthYear = getCurrentMonthYear();
+        setLines([{
+          descriere: expense.description || "",
+          sumaCuTVA: expense.amount_with_vat ? formatAmount(expense.amount_with_vat) : "",
+          sumaFaraTVA: expense.amount_without_vat ? formatAmount(expense.amount_without_vat) : "",
+          tva: expense.amount_with_vat && expense.amount_without_vat 
+            ? formatAmount(expense.amount_with_vat - expense.amount_without_vat) 
+            : "",
+          cotaTVA: expense.vat_rate ? `${expense.vat_rate.toFixed(2)}%` : "",
+          lunaP: convertFromAccountingPeriod(expense.accounting_period, defaultMonthYear),
+          categoryId: expense.category_id || "",
+          subcategoryId: expense.subcategory_id || "",
+          tvaDeductibil: expense.vat_deductible ? "Da" : "Nu",
+          tags: expense.tags?.join(", ") || "",
+          manualFields: [],
+          calculatedField: null,
+        }]);
+      } catch (err) {
+        console.error("Failed to load expense:", err);
+        setShowServerErrorModal(true);
+      } finally {
+        setLoadingExpense(false);
+      }
+    }
+    loadExpense();
+  }, [expenseId, teamId, getCurrentMonthYear]);
+
   // Handle back navigation
   const handleBack = () => {
     if (onBack) {
@@ -281,29 +370,16 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     return `${day}-${month}-${year}`;
   };
 
-  // Date validation
+  // Date validation - no restrictions, any date is valid
   const validateDate = useCallback((date: Date) => {
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
-    if (date > today) {
-      return { valid: false, error: "Data nu poate fi in viitor" };
-    }
-    if (date < MIN_DATE) {
-      return { valid: false, error: `Data trebuie sa fie dupa 1 ianuarie ${MIN_DATE.getFullYear()}` };
-    }
     return { valid: true };
   }, []);
 
   const handleDateSelect = useCallback((date: Date) => {
-    const validation = validateDate(date);
-    if (!validation.valid) {
-      setValidationError(validation.error || "Data invalida");
-      return;
-    }
     setSelectedDate(date);
     setShowDatePicker(false);
     setValidationError("");
-  }, [validateDate]);
+  }, []);
 
   // Supplier search handlers
   const handleSupplierSearch = useCallback(async (query: string) => {
@@ -647,43 +723,62 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
         status: isDraft ? "draft" : "draft",
       };
 
-      let expenseId: string;
+      let savedExpenseId: string;
       
-      if (lines.length === 1) {
-        const result = await createExpense(baseInput);
-        expenseId = result.id;
+      // If editing, update existing expense
+      if (expenseId) {
+        await updateExpense(expenseId, teamId, baseInput);
+        savedExpenseId = expenseId;
       } else {
-        const lineInputs: ExpenseLineInput[] = lines.map(line => {
-          const lineTags = line.tags.trim() ? validateTags(line.tags).tags : undefined;
-          return {
-            amount: parseAmount(line.sumaCuTVA) || parseAmount(line.sumaFaraTVA),
-            amountWithVat: parseAmount(line.sumaCuTVA) || 0,
-            amountWithoutVat: parseAmount(line.sumaFaraTVA) || 0,
-            vatRate: line.cotaTVA ? parseFloat(line.cotaTVA.replace("%", "").replace(",", ".")) : undefined,
-            vatDeductible: line.tvaDeductibil === "Da",
-            description: line.descriere || undefined,
-            categoryId: line.categoryId || undefined,
-            subcategoryId: line.subcategoryId || undefined,
-            accountingPeriod: convertToAccountingPeriod(line.lunaP) || undefined,
-          };
-        });
-        const results = await createMultiLineExpense(baseInput, lineInputs);
-        expenseId = results[0].id;
+        // Creating new expense
+        if (lines.length === 1) {
+          const result = await createExpense(baseInput);
+          savedExpenseId = result.id;
+        } else {
+          const lineInputs: ExpenseLineInput[] = lines.map(line => {
+            const lineTags = line.tags.trim() ? validateTags(line.tags).tags : undefined;
+            return {
+              amount: parseAmount(line.sumaCuTVA) || parseAmount(line.sumaFaraTVA),
+              amountWithVat: parseAmount(line.sumaCuTVA) || 0,
+              amountWithoutVat: parseAmount(line.sumaFaraTVA) || 0,
+              vatRate: line.cotaTVA ? parseFloat(line.cotaTVA.replace("%", "").replace(",", ".")) : undefined,
+              vatDeductible: line.tvaDeductibil === "Da",
+              description: line.descriere || undefined,
+              categoryId: line.categoryId || undefined,
+              subcategoryId: line.subcategoryId || undefined,
+              accountingPeriod: convertToAccountingPeriod(line.lunaP) || undefined,
+            };
+          });
+          const results = await createMultiLineExpense(baseInput, lineInputs);
+          savedExpenseId = results[0].id;
+        }
       }
 
-      // Upload all attachments
+      // Upload new attachments (only files that aren't already uploaded)
       for (const file of uploadedFiles) {
+        // Skip existing attachments that were loaded from the server
+        if (file.isExisting) {
+          continue;
+        }
+        
+        // Upload new files
         const base64Data = file.preview.split(",")[1];
-        await uploadAttachment(expenseId, teamId, {
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          base64: base64Data,
-        });
+        try {
+          await uploadAttachment(savedExpenseId, teamId, {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            base64: base64Data,
+          });
+        } catch (err) {
+          console.error("Failed to upload attachment:", err);
+          // Continue with other files even if one fails
+        }
       }
 
-      if (!isDraft) {
-        await submitForApproval(expenseId, teamId);
+      // Only submit for approval if creating new expense and not draft
+      if (!expenseId && !isDraft) {
+        await submitForApproval(savedExpenseId, teamId);
       }
 
       setShowSuccessModal(true);
@@ -718,6 +813,26 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
     border: 'none',
     transition: 'all 0.2s ease'
   };
+
+  // Show loading state when loading existing expense
+  if (loadingExpense) {
+    return (
+      <div style={{
+        width: '100%',
+        minHeight: '100vh',
+        backgroundColor: 'rgba(248, 248, 248, 1)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: '"Inter", sans-serif'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <Loader2 size={32} className="animate-spin" style={{ color: 'rgba(30, 172, 200, 1)', margin: '0 auto 16px' }} />
+          <p style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '14px' }}>Se incarca...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -809,7 +924,7 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
         position: 'absolute',
         left: '208px',
         top: '35px'
-      }}>New Expense</h1>
+      }}>{expenseId ? 'Edit Expense' : 'New Expense'}</h1>
       
       <button 
         onMouseEnter={() => setIsHoveredBack(true)} 
@@ -941,8 +1056,6 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
                   selectedDate={selectedDate}
                   onDateSelect={handleDateSelect}
                   onClose={() => setShowDatePicker(false)}
-                  minDate={MIN_DATE}
-                  maxDate={new Date()}
                 />
               )}
             </div>
@@ -1382,14 +1495,12 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
           <div style={{
             width: '740px',
             minHeight: '562px',
-            maxHeight: '80vh',
             backgroundColor: 'rgba(255, 255, 255, 0.7)',
             border: '1px solid rgba(229, 231, 235, 0.3)',
             borderRadius: '16px',
             display: 'flex',
             flexDirection: 'column',
             boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
-            overflow: 'hidden',
             position: 'relative'
           }}>
             {uploadedFiles.length > 0 ? (
@@ -1450,10 +1561,9 @@ export function NewExpenseForm({ teamId, onBack }: Props) {
                   </div>
                 )}
 
-                {/* Scrollable Preview Area */}
+                {/* Preview Area - page scrolls instead of this container */}
                 <div style={{ 
                   flex: 1, 
-                  overflow: imageZoom > 1 ? 'scroll' : 'auto', 
                   position: 'relative',
                   padding: uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? '60px 16px 60px 16px' : '0'
                 }}>
