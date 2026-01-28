@@ -1,64 +1,102 @@
-// @ts-nocheck
 "use client";
 
-import React, { useState } from 'react';
-import { X, Check, User, RefreshCcw, Ban } from 'lucide-react';
-
-// Mock user data based on the image
-const mockUsers = [
-  { id: 1, firstName: 'Ana', lastName: 'Popescu', email: 'ana.popescu@companie.ro', role: 'Admin', active: true, hasAvatar: true, lastChanged: '15-Noi-24' },
-  { id: 2, firstName: 'Mihai', lastName: 'Ionescu', email: 'mihai.ionescu@companie.ro', role: 'Editor', active: true, hasAvatar: true, lastChanged: '22-Oct-24' },
-  { id: 3, firstName: 'Elena', lastName: 'Marinescu', email: 'elena.marinescu@companie.ro', role: 'Viewer', active: true, hasAvatar: true, lastChanged: '10-Sep-24' },
-  { id: 4, firstName: 'Gabriel', lastName: 'Popa', email: 'gabriel.popa@companie.ro', role: 'Editor', active: true, hasAvatar: true, lastChanged: '05-Dec-24' },
-  { id: 5, firstName: 'Andreea', lastName: 'Diaconu', email: 'andreea.diaconu@companie.ro', role: 'Admin', active: true, hasAvatar: true, lastChanged: '20-Aug-24' },
-  { id: 6, firstName: 'Cristian', lastName: 'Stanciu', email: 'cristian.stanciu@companie.ro', role: 'Viewer', active: true, hasAvatar: false, lastChanged: '14-Noi-24' },
-  { id: 7, firstName: 'Maria', lastName: 'Radu', email: 'maria.radu@companie.ro', role: 'Editor', active: true, hasAvatar: false, lastChanged: '08-Oct-24' },
-  { id: 8, firstName: 'Ioana', lastName: 'Vasile', email: 'ioana.vasile@companie.ro', role: 'Editor', active: true, hasAvatar: false, lastChanged: '25-Sep-24' },
-  { id: 9, firstName: 'Daniel', lastName: 'Constantin', email: 'daniel.constantin@companie.ro', role: 'Admin', active: true, hasAvatar: false, lastChanged: '12-Iul-24' },
-  { id: 10, firstName: 'Adrian', lastName: 'Niculae', email: 'adrian.niculae@companie.ro', role: 'Editor', active: true, hasAvatar: false, lastChanged: '05-Dec-24' },
-  { id: 11, firstName: 'Simona', lastName: 'Tudor', email: 'simona.tudor@companie.ro', role: 'Viewer', active: true, hasAvatar: false, lastChanged: '15-Aug-24' },
-  { id: 12, firstName: 'Laura', lastName: 'Stoica', email: 'laura.stoica@companie.ro', role: 'Admin', active: true, hasAvatar: false, lastChanged: '11-Noi-24' },
-];
-
-const inactiveUsers = [
-  { id: 13, firstName: 'Ion', lastName: 'Gheorghe', email: 'ion.gheorghe@companie.ro', role: 'Viewer', active: false, hasAvatar: false, lastChanged: '24-Noi-24' },
-  { id: 14, firstName: 'Carmen', lastName: 'Dumitru', email: 'carmen.dumitru@companie.ro', role: 'Editor', active: false, hasAvatar: false, lastChanged: '12-Oct-24' },
-];
+import React, { useState, useEffect, useCallback } from 'react';
+import { X, Check, User, RefreshCcw, Ban, Loader2 } from 'lucide-react';
+import { 
+  getTeamMembers, 
+  setMemberActiveStatus,
+  TeamMemberWithProfile 
+} from '@/app/actions/team-members';
 
 type Role = 'Admin' | 'Editor' | 'Viewer';
 
 interface UserType {
-  id: number;
+  id: string;
   firstName: string;
   lastName: string;
   email: string;
   role: Role;
   active: boolean;
   hasAvatar: boolean;
+  avatarUrl?: string | null;
   lastChanged?: string;
 }
 
 interface UtilizatoriProps {
   onClose?: () => void;
+  teamId?: string;
+}
+
+// Map database roles to UI roles
+function mapRole(dbRole: string): Role {
+  switch (dbRole.toLowerCase()) {
+    case 'owner':
+    case 'admin':
+      return 'Admin';
+    case 'viewer':
+      return 'Viewer';
+    case 'member':
+    case 'editor':
+    default:
+      return 'Editor';
+  }
+}
+
+// Format date to Romanian format (DD-MMM-YY)
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '-';
+  const date = new Date(dateStr);
+  const months = ['Ian', 'Feb', 'Mar', 'Apr', 'Mai', 'Iun', 'Iul', 'Aug', 'Sep', 'Oct', 'Noi', 'Dec'];
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = months[date.getMonth()];
+  const year = date.getFullYear().toString().slice(-2);
+  return `${day}-${month}-${year}`;
+}
+
+// Split name into firstName and lastName
+function splitName(fullName: string | null): { firstName: string; lastName: string } {
+  if (!fullName) return { firstName: 'Unknown', lastName: '' };
+  const parts = fullName.trim().split(' ');
+  if (parts.length === 1) return { firstName: parts[0], lastName: '' };
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+}
+
+// Transform database member to UI user type
+function transformMember(member: TeamMemberWithProfile): UserType {
+  const { firstName, lastName } = splitName(member.name);
+  return {
+    id: member.user_id,
+    firstName,
+    lastName,
+    email: member.email || '',
+    role: mapRole(member.role),
+    active: member.is_active,
+    hasAvatar: !!member.avatar_url,
+    avatarUrl: member.avatar_url,
+    lastChanged: formatDate(member.updated_at || member.joined_at),
+  };
 }
 
 interface ActivateModalProps {
   onClose: () => void;
   onConfirm: () => void;
+  loading?: boolean;
 }
 
 interface DeactivateModalProps {
   onClose: () => void;
   onConfirm: () => void;
+  loading?: boolean;
 }
 
-function DeactivateModal({ onClose, onConfirm }: DeactivateModalProps) {
+function DeactivateModal({ onClose, onConfirm, loading }: DeactivateModalProps) {
   return (
     <div className="absolute inset-0 bg-black/20 backdrop-blur-[1px] flex items-center justify-center z-50">
       <div className="bg-white rounded-[24px] p-8 w-[400px] shadow-xl flex flex-col items-center text-center relative animate-in fade-in zoom-in duration-200">
         <button 
           onClick={onClose}
-          className="absolute left-6 top-6 p-1 hover:bg-gray-100 rounded-lg transition-colors"
+          disabled={loading}
+          className="absolute left-6 top-6 p-1 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
         >
           <X size={20} className="text-gray-400" />
         </button>
@@ -78,14 +116,17 @@ function DeactivateModal({ onClose, onConfirm }: DeactivateModalProps) {
         <div className="flex gap-3 w-full">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+            disabled={loading}
+            className="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-gray-700 font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
             Anuleaza
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-full font-medium hover:bg-red-600 transition-colors shadow-sm"
+            disabled={loading}
+            className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-full font-medium hover:bg-red-600 transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
           >
+            {loading && <Loader2 size={16} className="animate-spin" />}
             Inactiveaza
           </button>
         </div>
@@ -94,13 +135,14 @@ function DeactivateModal({ onClose, onConfirm }: DeactivateModalProps) {
   );
 }
 
-function ActivateModal({ onClose, onConfirm }: ActivateModalProps) {
+function ActivateModal({ onClose, onConfirm, loading }: ActivateModalProps) {
   return (
     <div className="absolute inset-0 bg-black/20 backdrop-blur-[1px] flex items-center justify-center z-50">
       <div className="bg-white rounded-[24px] p-8 w-[400px] shadow-xl flex flex-col items-center text-center relative animate-in fade-in zoom-in duration-200">
         <button 
           onClick={onClose}
-          className="absolute left-6 top-6 p-1 hover:bg-gray-100 rounded-lg transition-colors"
+          disabled={loading}
+          className="absolute left-6 top-6 p-1 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
         >
           <X size={20} className="text-gray-400" />
         </button>
@@ -120,14 +162,17 @@ function ActivateModal({ onClose, onConfirm }: ActivateModalProps) {
         <div className="flex gap-3 w-full">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+            disabled={loading}
+            className="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-gray-700 font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
             Anuleaza
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 px-4 py-2.5 bg-teal-500 text-white rounded-full font-medium hover:bg-teal-600 transition-colors shadow-sm"
+            disabled={loading}
+            className="flex-1 px-4 py-2.5 bg-teal-500 text-white rounded-full font-medium hover:bg-teal-600 transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
           >
+            {loading && <Loader2 size={16} className="animate-spin" />}
             Activeaza
           </button>
         </div>
@@ -136,12 +181,73 @@ function ActivateModal({ onClose, onConfirm }: ActivateModalProps) {
   );
 }
 
-export function Utilizatori({ onClose }: UtilizatoriProps) {
+export function Utilizatori({ onClose, teamId }: UtilizatoriProps) {
   const [activeTab, setActiveTab] = useState<'activi' | 'inactivi'>('activi');
   const [activatingUser, setActivatingUser] = useState<UserType | null>(null);
   const [deactivatingUser, setDeactivatingUser] = useState<UserType | null>(null);
+  const [allUsers, setAllUsers] = useState<UserType[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const users = activeTab === 'activi' ? mockUsers : inactiveUsers;
+  // Load team members
+  const loadMembers = useCallback(async () => {
+    if (!teamId) {
+      setLoading(false);
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      const members = await getTeamMembers(teamId);
+      const transformed = members.map(transformMember);
+      setAllUsers(transformed);
+    } catch (error) {
+      console.error('Failed to load team members:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [teamId]);
+
+  useEffect(() => {
+    loadMembers();
+  }, [loadMembers]);
+
+  // Handle activate user
+  const handleActivate = async () => {
+    if (!activatingUser || !teamId) return;
+    
+    try {
+      setActionLoading(true);
+      await setMemberActiveStatus(teamId, activatingUser.id, true);
+      await loadMembers();
+      setActivatingUser(null);
+    } catch (error) {
+      console.error('Failed to activate user:', error);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle deactivate user
+  const handleDeactivate = async () => {
+    if (!deactivatingUser || !teamId) return;
+    
+    try {
+      setActionLoading(true);
+      await setMemberActiveStatus(teamId, deactivatingUser.id, false);
+      await loadMembers();
+      setDeactivatingUser(null);
+    } catch (error) {
+      console.error('Failed to deactivate user:', error);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Filter users by active status
+  const activeUsers = allUsers.filter(u => u.active);
+  const inactiveUsers = allUsers.filter(u => !u.active);
+  const users = activeTab === 'activi' ? activeUsers : inactiveUsers;
 
   const getRoleBadgeStyle = (role: Role) => {
     switch (role) {
@@ -172,7 +278,7 @@ export function Utilizatori({ onClose }: UtilizatoriProps) {
     }
   };
 
-  const getAvatarColor = (id: number) => {
+  const getAvatarColor = (id: string) => {
     const colors = [
       'bg-amber-100',
       'bg-blue-100',
@@ -181,7 +287,12 @@ export function Utilizatori({ onClose }: UtilizatoriProps) {
       'bg-pink-100',
       'bg-cyan-100',
     ];
-    return colors[id % colors.length];
+    // Hash the string id to get a consistent index
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+      hash = id.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
   };
 
   return (
@@ -189,20 +300,16 @@ export function Utilizatori({ onClose }: UtilizatoriProps) {
       {activatingUser && (
         <ActivateModal 
           onClose={() => setActivatingUser(null)} 
-          onConfirm={() => {
-            console.log('Activating user:', activatingUser);
-            setActivatingUser(null);
-          }} 
+          onConfirm={handleActivate}
+          loading={actionLoading}
         />
       )}
 
       {deactivatingUser && (
         <DeactivateModal 
           onClose={() => setDeactivatingUser(null)} 
-          onConfirm={() => {
-            console.log('Deactivating user:', deactivatingUser);
-            setDeactivatingUser(null);
-          }} 
+          onConfirm={handleDeactivate}
+          loading={actionLoading}
         />
       )}
       {/* Header */}
@@ -269,17 +376,27 @@ export function Utilizatori({ onClose }: UtilizatoriProps) {
 
         {/* Table Body */}
         <div className="divide-y divide-gray-50">
-          {users.map((user) => (
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 size={24} className="animate-spin text-teal-500" />
+              <span className="ml-2 text-gray-500">Se incarca...</span>
+            </div>
+          ) : users.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+              <User size={48} className="text-gray-300 mb-3" />
+              <p>{activeTab === 'activi' ? 'Nu exista utilizatori activi' : 'Nu exista utilizatori inactivi'}</p>
+            </div>
+          ) : users.map((user) => (
             <div 
               key={user.id} 
               className={`grid ${'grid-cols-[1fr_1.5fr_100px_140px_80px]'} gap-4 py-4 items-center hover:bg-gray-50/50 transition-colors pl-4`}
             >
               {/* User Avatar + Name */}
               <div className="flex items-center gap-3">
-                {user.hasAvatar ? (
-                  <div className={`w-10 h-10 rounded-full ${getAvatarColor(user.id)} flex items-center justify-center overflow-hidden`}>
+                {user.hasAvatar && user.avatarUrl ? (
+                  <div className="w-10 h-10 rounded-full overflow-hidden">
                     <img 
-                      src={`https://i.pravatar.cc/40?img=${user.id}`} 
+                      src={user.avatarUrl} 
                       alt={`${user.firstName} ${user.lastName}`}
                       className="w-full h-full object-cover"
                     />

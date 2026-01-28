@@ -17,9 +17,10 @@ import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
 
 interface UserDropdownProps {
   colorModeToggle?: () => void;
+  teamId?: string;
 }
 
-export function UserDropdown({ colorModeToggle }: UserDropdownProps) {
+export function UserDropdown({ colorModeToggle, teamId }: UserDropdownProps) {
   const user = useUser({ or: 'redirect' });
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
@@ -195,7 +196,7 @@ export function UserDropdown({ colorModeToggle }: UserDropdownProps) {
           
           {/* Modal Content */}
           <div className="relative z-10 max-h-[90vh] overflow-auto">
-            <Utilizatori onClose={() => setShowUtilizatori(false)} />
+            <Utilizatori onClose={() => setShowUtilizatori(false)} teamId={teamId} />
           </div>
         </div>
       )}

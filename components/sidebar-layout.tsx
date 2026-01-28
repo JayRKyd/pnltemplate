@@ -298,6 +298,7 @@ export default function SidebarLayout(props: {
             colorModeToggle={() =>
               setTheme(resolvedTheme === "light" ? "dark" : "light")
             }
+            teamId={props.currentTeam?.id}
           />
         </div>
         </div>
