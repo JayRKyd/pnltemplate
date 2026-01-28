@@ -1494,7 +1494,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
           {/* Right Side Document Preview */}
           <div style={{
             width: '740px',
-            height: '562px',
+            minHeight: '562px',
             backgroundColor: 'rgba(255, 255, 255, 0.7)',
             border: '1px solid rgba(229, 231, 235, 0.3)',
             borderRadius: '16px',
@@ -1503,8 +1503,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
             boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
             position: 'sticky',
             top: '100px',
-            flexShrink: 0,
-            overflow: 'hidden'
+            flexShrink: 0
           }}>
             {uploadedFiles.length > 0 ? (
               <>
@@ -1564,11 +1563,10 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                   </div>
                 )}
 
-                {/* Preview Area - contained within fixed height */}
+                {/* Preview Area - expands to fit document */}
                 <div style={{ 
                   flex: 1, 
                   position: 'relative',
-                  overflow: 'auto',
                   padding: uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? '60px 16px 16px 16px' : '0'
                 }}>
                   {/* Preview Image/PDF */}
@@ -1595,7 +1593,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                   ) : (
                     <iframe 
                       src={uploadedFiles[activePreviewIndex].preview} 
-                      style={{ width: '100%', height: '100%', minHeight: '562px', border: 'none' }}
+                      style={{ width: '100%', height: '2000px', border: 'none' }}
                       title="Document preview"
                     />
                   )}

@@ -91,14 +91,34 @@ export interface ExpenseFilters {
   search?: string;
 }
 
+// Fields needed for list view (optimized - smaller payload)
+const EXPENSE_LIST_FIELDS = `
+  id,
+  expense_uid,
+  team_id,
+  amount,
+  amount_without_vat,
+  currency,
+  status,
+  payment_status,
+  supplier,
+  description,
+  category_id,
+  subcategory_id,
+  doc_type,
+  expense_date,
+  created_at
+` as const;
+
 // Get expenses with optional filters
+// Optimized: Selects only fields needed for list view
 export async function getTeamExpenses(
   teamId: string,
   filters?: ExpenseFilters
 ): Promise<TeamExpense[]> {
   let query = supabase
     .from("team_expenses")
-    .select("*")
+    .select(EXPENSE_LIST_FIELDS)
     .eq("team_id", teamId)
     .is("deleted_at", null);
 

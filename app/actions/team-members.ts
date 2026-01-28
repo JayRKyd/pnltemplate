@@ -263,35 +263,61 @@ export async function syncTeamMembership(teamId: string, role: string = "member"
 }
 
 // Get all members of a team from Supabase
+// Optimized: Uses database view to avoid N+1 query pattern
 export async function getTeamMembers(teamId: string): Promise<TeamMemberWithProfile[]> {
-  // Get memberships
+  // Use the optimized view that joins memberships with user profiles
+  const { data, error } = await supabase
+    .from("team_members_with_profiles")
+    .select("user_id, email, name, avatar_url, role, joined_at, updated_at, is_active")
+    .eq("team_id", teamId);
+
+  if (error) {
+    // Fallback to old method if view doesn't exist yet
+    if (error.code === "42P01") {
+      console.log("[getTeamMembers] View not found, using fallback method");
+      return getTeamMembersFallback(teamId);
+    }
+    console.error("[getTeamMembers] Error fetching members:", error);
+    throw error;
+  }
+
+  return (data || []).map((m) => ({
+    user_id: m.user_id,
+    email: m.email || null,
+    name: m.name || null,
+    avatar_url: m.avatar_url || null,
+    role: m.role,
+    joined_at: m.joined_at,
+    updated_at: m.updated_at || null,
+    is_active: m.is_active ?? true,
+  }));
+}
+
+// Fallback method for when view doesn't exist (pre-migration)
+async function getTeamMembersFallback(teamId: string): Promise<TeamMemberWithProfile[]> {
   const { data: memberships, error: memberError } = await supabase
     .from("team_memberships")
-    .select("*")
+    .select("user_id, role, joined_at, updated_at, is_active")
     .eq("team_id", teamId);
 
   if (memberError) {
-    console.error("[getTeamMembers] Error fetching memberships:", memberError);
+    console.error("[getTeamMembersFallback] Error:", memberError);
     throw memberError;
   }
 
-  if (!memberships || memberships.length === 0) {
-    return [];
-  }
+  if (!memberships || memberships.length === 0) return [];
 
-  // Get user profiles
   const userIds = memberships.map((m) => m.user_id);
   const { data: users, error: userError } = await supabase
     .from("stack_users")
-    .select("*")
+    .select("id, email, name, avatar_url")
     .in("id", userIds);
 
   if (userError) {
-    console.error("[getTeamMembers] Error fetching users:", userError);
+    console.error("[getTeamMembersFallback] Error fetching users:", userError);
     throw userError;
   }
 
-  // Merge memberships with user profiles
   const userMap = new Map(users?.map((u) => [u.id, u]) || []);
   
   return memberships.map((m) => {

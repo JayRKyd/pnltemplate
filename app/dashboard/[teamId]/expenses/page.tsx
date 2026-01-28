@@ -447,10 +447,14 @@ export default function ExpensesPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [openDropdown]);
 
-  // Fetch categories on mount
-  useEffect(() => {
-    if (params.teamId) {
-      getTeamCategories(params.teamId).then(setCategories).catch(console.error);
+  // Load categories (part of parallel load)
+  const loadCategories = useCallback(async () => {
+    if (!params.teamId) return;
+    try {
+      const cats = await getTeamCategories(params.teamId);
+      setCategories(cats);
+    } catch (err) {
+      console.error("Failed to fetch categories:", err);
     }
   }, [params.teamId]);
 
@@ -498,10 +502,14 @@ export default function ExpensesPage() {
     }
   }, [params.teamId, selectedYear]);
 
+  // Load all data in parallel for better performance
   useEffect(() => {
-    loadExpenses();
-    loadRecurringExpenses();
-  }, [loadExpenses, loadRecurringExpenses]);
+    Promise.all([
+      loadExpenses(),
+      loadRecurringExpenses(),
+      loadCategories(),
+    ]);
+  }, [loadExpenses, loadRecurringExpenses, loadCategories]);
 
   const handleRecurringPaymentToggle = async () => {
     if (!recurringPaymentModal) return;
