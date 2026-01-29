@@ -506,22 +506,33 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
       const line = { ...newLines[index] };
       
       if (field === "sumaCuTVA" || field === "sumaFaraTVA" || field === "tva") {
+        // TVA is always calculated, never manually editable
+        if (field === "tva") {
+          // Don't allow manual editing of TVA
+          return newLines;
+        }
+        
         line[field] = value;
         
-        const amountField = field as "sumaCuTVA" | "sumaFaraTVA" | "tva";
+        const amountField = field as "sumaCuTVA" | "sumaFaraTVA";
+        // Only sumaCuTVA and sumaFaraTVA can be manual fields
         if (!line.manualFields.includes(amountField) && value.trim() !== "") {
-          line.manualFields = [...line.manualFields, amountField];
+          line.manualFields = [...line.manualFields.filter(f => f !== "tva"), amountField];
         }
         
         if (value.trim() === "" || value === "0" || value === "0,00") {
           line.manualFields = line.manualFields.filter(f => f !== amountField);
         }
         
+        // Remove TVA from manualFields if it was somehow added
+        line.manualFields = line.manualFields.filter(f => f !== "tva");
+        
         const filledFields = line.manualFields.filter(f => {
           const val = line[f];
           return val && val.trim() !== "" && val !== "0" && val !== "0,00";
         });
         
+        // Always calculate TVA when both sumaCuTVA and sumaFaraTVA are filled
         if (filledFields.length === 2) {
           const [field1, field2] = filledFields;
           const value1 = parseAmount(line[field1]);
@@ -535,6 +546,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
             } else if (result.calculatedField === "sumaFaraTVA") {
               line.sumaFaraTVA = formatAmount(result.sumaFaraTVA.toFixed(2));
             } else {
+              // TVA is always calculated
               line.tva = formatAmount(result.tva.toFixed(2));
             }
             
@@ -544,6 +556,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         } else if (filledFields.length < 2) {
           line.calculatedField = null;
           line.cotaTVA = "";
+          line.tva = ""; // Clear TVA when not enough fields are filled
         }
       } else {
         (line as Record<string, unknown>)[field] = value;
@@ -960,18 +973,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         </div>
       )}
 
-      {/* Header Section */}
-      <h1 style={{
-        margin: 0,
-        color: 'rgba(0, 0, 0, 1)',
-        fontSize: '24px',
-        fontWeight: 500,
-        lineHeight: '24px',
-        position: 'absolute',
-        left: '208px',
-        top: '35px'
-      }}>{expenseId ? 'Edit Expense' : 'New Expense'}</h1>
-      
+      {/* Back Button */}
       <button 
         onMouseEnter={() => setIsHoveredBack(true)} 
         onMouseLeave={() => setIsHoveredBack(false)}
@@ -987,7 +989,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
           borderRadius: '12px',
           position: 'absolute',
           left: '128px',
-          top: '24px',
+          top: '20px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center'
@@ -1001,7 +1003,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         width: '1250px',
         position: 'absolute',
         left: '239px',
-        top: '93px'
+        top: '60px'
       }}>
         
         {/* Top Form Header */}
@@ -1273,22 +1275,17 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                       <TextInput 
                         placeholder="0,00"
                         value={line.tva}
-                        onChange={(e) => updateLine(index, "tva", e.target.value)}
-                        onBlur={() => handleAmountBlur(index, "tva")}
-                        readOnly={line.calculatedField === "tva"}
+                        readOnly={true}
+                        disabled={true}
                         className={hasFieldError(index, 'tva') ? 'error-placeholder' : 'normal-placeholder'}
                         style={{ 
                           paddingRight: '70px', 
-                          backgroundColor: line.calculatedField === "tva" ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'tva') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
-                          borderColor: hasFieldError(index, 'tva') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'
+                          backgroundColor: 'rgba(243, 244, 246, 0.5)',
+                          borderColor: hasFieldError(index, 'tva') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)',
+                          cursor: 'not-allowed'
                         }} 
                       />
                       <div style={{ position: 'absolute', right: '16px', top: '9px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {line.calculatedField === "tva" && (
-                          <button onClick={() => resetAmountFields(index)} style={{ ...buttonBaseStyle, background: 'none', padding: '2px' }}>
-                            <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
-                          </button>
-                        )}
                         <span style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>Lei</span>
                         <span style={{ fontSize: '12px' }}>🇷🇴</span>
                       </div>
@@ -1626,9 +1623,10 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                       }} 
                     />
                   ) : (
-                    <iframe 
-                      src={uploadedFiles[activePreviewIndex].preview} 
-                      style={{ width: '100%', height: '800px', border: 'none' }}
+                    <embed 
+                      src={`${uploadedFiles[activePreviewIndex].preview}#toolbar=0&navpanes=0&scrollbar=1`}
+                      type="application/pdf"
+                      style={{ width: '100%', height: '800px', border: 'none', borderRadius: '8px' }}
                       title="Document preview"
                     />
                   )}

@@ -83,6 +83,7 @@ export interface ExpenseLineInput {
 export interface ExpenseFilters {
   status?: string;
   categoryId?: string;
+  subcategoryId?: string;
   dateFrom?: string;
   dateTo?: string;
   supplier?: string;
@@ -108,6 +109,11 @@ export interface TeamExpenseListItem {
   doc_type: string | null;
   expense_date: string;
   created_at: string;
+  recurring_expense_id: string | null;
+  is_recurring_placeholder: boolean;
+  responsible_id: string | null;
+  user_id: string;
+  tags: string[] | null;
 }
 
 // Fields needed for list view (optimized - smaller payload)
@@ -126,7 +132,12 @@ const EXPENSE_LIST_FIELDS = `
   subcategory_id,
   doc_type,
   expense_date,
-  created_at
+  created_at,
+  recurring_expense_id,
+  is_recurring_placeholder,
+  responsible_id,
+  user_id,
+  tags
 ` as const;
 
 // Get expenses with optional filters
@@ -148,6 +159,9 @@ export async function getTeamExpenses(
   if (filters?.categoryId) {
     query = query.eq("category_id", filters.categoryId);
   }
+  if (filters?.subcategoryId) {
+    query = query.eq("subcategory_id", filters.subcategoryId);
+  }
   if (filters?.dateFrom) {
     query = query.gte("expense_date", filters.dateFrom);
   }
@@ -164,9 +178,13 @@ export async function getTeamExpenses(
     query = query.overlaps("tags", filters.tags);
   }
   if (filters?.search) {
+    // Search in supplier, description, expense_uid, and tags
+    // For tags (array field), we need to use a different approach
+    const searchTerm = filters.search.toLowerCase();
     query = query.or(
       `supplier.ilike.%${filters.search}%,description.ilike.%${filters.search}%,expense_uid.ilike.%${filters.search}%`
     );
+    // Tags search is handled client-side since Supabase array search is complex
   }
 
   const { data, error } = await query.order("expense_date", { ascending: false });
@@ -366,6 +384,7 @@ export async function updateExpense(
   if (updates.paymentStatus !== undefined) updateData.payment_status = updates.paymentStatus;
   if (updates.accountingPeriod !== undefined) updateData.accounting_period = updates.accountingPeriod;
   if (updates.expenseDate !== undefined) updateData.expense_date = updates.expenseDate;
+  if (updates.status !== undefined) updateData.status = updates.status;
 
   const { data, error } = await supabase
     .from("team_expenses")

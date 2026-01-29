@@ -400,7 +400,7 @@ export async function getRecurringExpensesWithPayments(
 
   const { data: expenses, error: expError } = await supabase
     .from("team_expenses")
-    .select("id, recurring_expense_id, expense_date, status, is_recurring_placeholder")
+    .select("id, recurring_expense_id, expense_date, status, payment_status, is_recurring_placeholder")
     .eq("team_id", teamId)
     .in("recurring_expense_id", recurringIds)
     .gte("expense_date", startDate)
@@ -427,8 +427,8 @@ export async function getRecurringExpensesWithPayments(
     }
     
     const payments = paymentsMap.get(exp.recurring_expense_id)!;
-    // If there's a real expense (not placeholder) or it's paid, mark as true
-    payments[monthKey] = !exp.is_recurring_placeholder || exp.status === 'paid';
+    // Only mark as paid if payment_status is 'paid'
+    payments[monthKey] = exp.payment_status === 'paid';
   });
 
   // Combine data
@@ -467,11 +467,18 @@ export async function updateRecurringPaymentStatus(
   }
 
   if (existingExpense) {
-    // Update the status
-    const newStatus = paid ? 'paid' : 'pending';
+    // Update status and payment_status
+    // When marking as paid: status becomes 'approved' (Final), payment_status becomes 'paid'
+    // When unmarking: status becomes 'placeholder' (Recurent), payment_status becomes 'unpaid'
+    const newStatus = paid ? 'approved' : 'placeholder';
+    const newPaymentStatus = paid ? 'paid' : 'unpaid';
     const { error: updateError } = await supabase
       .from("team_expenses")
-      .update({ status: newStatus })
+      .update({ 
+        status: newStatus,
+        payment_status: newPaymentStatus,
+        is_recurring_placeholder: !paid // If unpaid, it's a placeholder again
+      })
       .eq("id", existingExpense.id);
 
     if (updateError) {
@@ -510,7 +517,8 @@ export async function updateRecurringPaymentStatus(
         doc_type: recurring.doc_type,
         tags: recurring.tags,
         vat_deductible: recurring.vat_deductible,
-        status: 'paid',
+        status: 'approved', // Final status when marked as paid
+        payment_status: 'paid',
         is_recurring_placeholder: false
       });
 

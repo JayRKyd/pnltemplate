@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Check, X, ChevronDown, Calendar } from "lucide-react";
-import { getTeamExpenses, TeamExpenseListItem, ExpenseFilters } from "@/app/actions/expenses";
+import { getTeamExpenses, TeamExpenseListItem, ExpenseFilters, updateExpense } from "@/app/actions/expenses";
 import { 
   getRecurringExpensesWithPayments, 
   RecurringExpenseWithPayments,
   updateRecurringPaymentStatus 
 } from "@/app/actions/recurring-expenses";
 import { getTeamCategories, ExpenseCategory } from "@/app/actions/categories";
+import { getTeamMembers } from "@/app/actions/team-members";
 
 type TabType = 'Cheltuieli' | 'Recurente';
 
@@ -152,7 +153,7 @@ function PaymentStatusModal({ isOpen, onClose, onConfirm, supplierName, amount, 
           fontWeight: 600,
           marginBottom: '16px'
         }}>
-          {supplierName} - {amount} Lei
+          {supplierName && supplierName !== '-' ? `${supplierName} - ` : ''}{amount} Lei
         </p>
         
         <p style={{
@@ -234,9 +235,11 @@ export default function ExpensesPage() {
   const [paymentModalData, setPaymentModalData] = useState<{
     isOpen: boolean;
     index: number;
+    expenseId: string;
     supplierName: string;
     amount: string;
     currentlyPaid: boolean;
+    isRecurring: boolean;
   } | null>(null);
   const [recurringPaymentModal, setRecurringPaymentModal] = useState<{
     isOpen: boolean;
@@ -250,10 +253,17 @@ export default function ExpensesPage() {
   // Filter states
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [selectedSubcategory, setSelectedSubcategory] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
   const [selectedPayment, setSelectedPayment] = useState<string>('');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+  
+  // Get subcategories for the selected category
+  const subcategories = useMemo(() => {
+    if (!selectedCategory) return [];
+    return categories.filter(c => c.parent_id === selectedCategory);
+  }, [categories, selectedCategory]);
   
   // Dropdown open states
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
@@ -265,10 +275,8 @@ export default function ExpensesPage() {
   const statusOptions: FilterOption[] = [
     { value: '', label: 'Toate' },
     { value: 'draft', label: 'Draft' },
-    { value: 'pending', label: 'In asteptare' },
-    { value: 'approved', label: 'Aprobat' },
-    { value: 'rejected', label: 'Respins' },
-    { value: 'paid', label: 'Platit' },
+    { value: 'approved', label: 'Final' },
+    { value: 'recurring', label: 'Recurent' },
   ];
 
   // Payment options
@@ -311,8 +319,17 @@ export default function ExpensesPage() {
     try {
       const filters: ExpenseFilters = {};
       if (searchValue) filters.search = searchValue;
-      if (selectedCategory) filters.categoryId = selectedCategory;
-      if (selectedStatus) filters.status = selectedStatus;
+      // Category and subcategory filters
+      if (selectedCategory) {
+        filters.categoryId = selectedCategory;
+      }
+      if (selectedSubcategory) {
+        filters.subcategoryId = selectedSubcategory;
+      }
+      // Don't pass 'recurring' to backend - handle it client-side
+      if (selectedStatus && selectedStatus !== 'recurring') {
+        filters.status = selectedStatus;
+      }
       if (dateFrom) filters.dateFrom = dateFrom;
       if (dateTo) filters.dateTo = dateTo;
 
@@ -326,13 +343,68 @@ export default function ExpensesPage() {
         filteredData = data.filter(exp => exp.payment_status !== 'paid');
       }
       
+      // Apply recurring filter client-side if selected
+      if (selectedStatus === 'recurring') {
+        // Filter for recurring placeholders that are not yet marked as paid (Recurent status)
+        filteredData = filteredData.filter(exp => 
+          exp.recurring_expense_id !== null && 
+          (exp.is_recurring_placeholder === true || exp.status === 'placeholder') &&
+          exp.payment_status !== 'paid'
+        );
+      }
+      
+      // Apply client-side search for tags and user/colleague if search value exists
+      if (searchValue.trim()) {
+        const searchLower = searchValue.toLowerCase().trim();
+        
+        // Get team members for user search
+        let teamMembers: Array<{ user_id: string; name: string | null; email: string | null }> = [];
+        try {
+          const members = await getTeamMembers(params.teamId);
+          teamMembers = members.map(m => ({
+            user_id: m.user_id,
+            name: m.name || null,
+            email: m.email || null
+          }));
+        } catch (err) {
+          console.error("Failed to load team members for search:", err);
+        }
+        
+        // Find user IDs that match the search term
+        const matchingUserIds = teamMembers
+          .filter(m => 
+            (m.name && m.name.toLowerCase().includes(searchLower)) ||
+            (m.email && m.email.toLowerCase().includes(searchLower))
+          )
+          .map(m => m.user_id);
+        
+        filteredData = filteredData.filter(exp => {
+          // Check if search matches supplier, description, or expense_uid (already done by backend)
+          const matchesBasicFields = 
+            (exp.supplier && exp.supplier.toLowerCase().includes(searchLower)) ||
+            (exp.description && exp.description.toLowerCase().includes(searchLower)) ||
+            (exp.expense_uid && exp.expense_uid.toLowerCase().includes(searchLower));
+          
+          // Check if search matches tags
+          const matchesTags = exp.tags && exp.tags.some(tag => 
+            tag.toLowerCase().includes(searchLower)
+          );
+          
+          // Check if search matches responsible user (colleague) OR creator (user who input the expense)
+          const matchesResponsibleUser = exp.responsible_id && matchingUserIds.includes(exp.responsible_id);
+          const matchesCreator = exp.user_id && matchingUserIds.includes(exp.user_id);
+          
+          return matchesBasicFields || matchesTags || matchesResponsibleUser || matchesCreator;
+        });
+      }
+      
       setExpenses(filteredData);
     } catch (err) {
       console.error("Failed to fetch expenses:", err);
     } finally {
       setLoading(false);
     }
-  }, [params.teamId, activeSubTab, searchValue, selectedCategory, selectedStatus, selectedPayment, dateFrom, dateTo]);
+  }, [params.teamId, activeSubTab, searchValue, selectedCategory, selectedSubcategory, selectedStatus, selectedPayment, dateFrom, dateTo]);
 
   const loadRecurringExpenses = useCallback(async () => {
     if (!params.teamId) return;
@@ -354,8 +426,10 @@ export default function ExpensesPage() {
 
     let filtered = [...allRecurringExpenses];
 
-    // Category filter
-    if (selectedCategory) {
+    // Category/Subcategory filter
+    if (selectedSubcategory) {
+      filtered = filtered.filter(exp => exp.subcategory_id === selectedSubcategory);
+    } else if (selectedCategory) {
       filtered = filtered.filter(exp => exp.category_id === selectedCategory);
     }
 
@@ -388,7 +462,7 @@ export default function ExpensesPage() {
     }
 
     setRecurringExpenses(filtered);
-  }, [allRecurringExpenses, selectedCategory, searchValue, dateFrom, dateTo, activeSubTab]);
+  }, [allRecurringExpenses, selectedCategory, selectedSubcategory, searchValue, dateFrom, dateTo, activeSubTab]);
 
   // Load all data in parallel for better performance
   useEffect(() => {
@@ -420,17 +494,40 @@ export default function ExpensesPage() {
   };
 
   // Map expenses to display format
-  const displayData = expenses.map(exp => ({
-    status: (exp.status === 'approved' ? 'Final' : exp.status === 'draft' ? 'Draft' : 'Final') as 'Final' | 'Draft' | 'Recurent',
-    date: formatExpenseDate(exp.expense_date),
-    type: exp.doc_type || 'Factura',
-    provider: exp.supplier || '-',
-    description: exp.description || '-',
-    amount: formatAmountMain(exp.amount || 0),
-    decimals: formatAmountDecimals(exp.amount || 0),
-    paid: exp.status === 'paid',
-    id: exp.id
-  }));
+  const displayData = expenses.map(exp => {
+    // Determine status: Recurring placeholders show as "Recurent" until marked as paid
+    let displayStatus: 'Final' | 'Draft' | 'Recurent';
+    
+    if (exp.recurring_expense_id) {
+      // This is a recurring-linked expense
+      if (exp.is_recurring_placeholder || exp.status === 'placeholder') {
+        // Placeholder or not yet paid - show as Recurent
+        displayStatus = 'Recurent';
+      } else if (exp.payment_status === 'paid' || exp.status === 'approved' || exp.status === 'paid') {
+        // Marked as paid - show as Final
+        displayStatus = 'Final';
+      } else {
+        // Recurring but not placeholder and not paid - show as Recurent
+        displayStatus = 'Recurent';
+      }
+    } else {
+      // Regular expense (not recurring)
+      displayStatus = exp.status === 'approved' ? 'Final' : exp.status === 'draft' ? 'Draft' : 'Final';
+    }
+    
+    return {
+      status: displayStatus,
+      date: formatExpenseDate(exp.expense_date),
+      type: exp.doc_type || 'Factura',
+      provider: exp.supplier || '-',
+      description: exp.description || '-',
+      amount: formatAmountMain(exp.amount || 0),
+      decimals: formatAmountDecimals(exp.amount || 0),
+      paid: exp.payment_status === 'paid',
+      id: exp.id,
+      isRecurring: !!exp.recurring_expense_id
+    };
+  });
 
   // Pagination calculations
   const totalItems = displayData.length;
@@ -444,7 +541,7 @@ export default function ExpensesPage() {
     if (activeSubTab === 'Cheltuieli') {
       setCurrentPage(1);
     }
-  }, [searchValue, selectedCategory, selectedStatus, selectedPayment, dateFrom, dateTo, activeSubTab]);
+  }, [searchValue, selectedCategory, selectedSubcategory, selectedStatus, selectedPayment, dateFrom, dateTo, activeSubTab]);
 
   // Reset to page 1 when filters change and current page is out of bounds
   useEffect(() => {
@@ -494,10 +591,39 @@ export default function ExpensesPage() {
         <PaymentStatusModal
           isOpen={paymentModalData.isOpen}
           onClose={() => setPaymentModalData(null)}
-          onConfirm={() => {
-            console.log('Toggling payment status for expense:', paymentModalData.index);
-            setPaymentModalData(null);
-            loadExpenses();
+          onConfirm={async () => {
+            if (!paymentModalData) return;
+            
+            try {
+              const newPaymentStatus = paymentModalData.currentlyPaid ? 'unpaid' : 'paid';
+              
+              // For recurring expenses: when marking as paid, also change status to approved (Final)
+              // When marking as unpaid, change status back to placeholder (Recurent)
+              if (paymentModalData.isRecurring) {
+                const newStatus = newPaymentStatus === 'paid' ? 'approved' : 'placeholder';
+                await updateExpense(
+                  paymentModalData.expenseId,
+                  params.teamId,
+                  { 
+                    paymentStatus: newPaymentStatus as 'paid' | 'unpaid',
+                    status: newStatus
+                  }
+                );
+              } else {
+                await updateExpense(
+                  paymentModalData.expenseId,
+                  params.teamId,
+                  { paymentStatus: newPaymentStatus as 'paid' | 'unpaid' }
+                );
+              }
+              // Reload expenses to reflect the change
+              await loadExpenses();
+            } catch (err) {
+              console.error('Failed to update payment status:', err);
+              // Optionally show an error message to the user
+            } finally {
+              setPaymentModalData(null);
+            }
           }}
           supplierName={paymentModalData.supplierName}
           amount={paymentModalData.amount}
@@ -672,7 +798,7 @@ export default function ExpensesPage() {
                 zIndex: 100
               }}>
                 <div
-                  onClick={() => { setSelectedCategory(''); setOpenDropdown(null); }}
+                  onClick={() => { setSelectedCategory(''); setSelectedSubcategory(''); setOpenDropdown(null); }}
                   style={{
                     padding: '12px 16px',
                     cursor: 'pointer',
@@ -689,7 +815,7 @@ export default function ExpensesPage() {
                 {categories.filter(c => !c.parent_id).map(cat => (
                   <div
                     key={cat.id}
-                    onClick={() => { setSelectedCategory(cat.id); setOpenDropdown(null); }}
+                    onClick={() => { setSelectedCategory(cat.id); setSelectedSubcategory(''); setOpenDropdown(null); }}
                     style={{
                       padding: '12px 16px',
                       cursor: 'pointer',
@@ -707,27 +833,84 @@ export default function ExpensesPage() {
             )}
           </div>
 
-          {/* Cont Filter - placeholder for now */}
-          <button 
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '0 25px',
-              height: '40.5px',
-              backgroundColor: 'rgba(255, 255, 255, 0.7)',
-              border: '1px solid rgba(209, 213, 220, 0.5)',
-              borderRadius: '9999px',
-              cursor: 'not-allowed',
-              color: 'rgba(153, 161, 175, 1)',
-              fontSize: '15px',
-              boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
-              opacity: 0.4
-            }}
+          {/* Cont (Subcategory) Filter */}
+          <div 
+            ref={(el) => { dropdownRefs.current['subcategory'] = el; }}
+            style={{ position: 'relative' }}
           >
-            Cont
-            <ChevronDown size={16} />
-          </button>
+            <button 
+              onClick={() => {
+                if (selectedCategory && subcategories.length > 0) {
+                  setOpenDropdown(openDropdown === 'subcategory' ? null : 'subcategory');
+                }
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '0 25px',
+                height: '40.5px',
+                backgroundColor: selectedSubcategory ? 'rgba(30, 172, 200, 0.1)' : 'rgba(255, 255, 255, 0.7)',
+                border: selectedSubcategory ? '1px solid rgba(30, 172, 200, 0.5)' : '1px solid rgba(209, 213, 220, 0.5)',
+                borderRadius: '9999px',
+                cursor: selectedCategory && subcategories.length > 0 ? 'pointer' : 'not-allowed',
+                color: selectedSubcategory ? 'rgba(30, 172, 200, 1)' : (!selectedCategory || subcategories.length === 0) ? 'rgba(153, 161, 175, 0.5)' : 'rgba(153, 161, 175, 1)',
+                fontSize: '15px',
+                boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
+                opacity: (!selectedCategory || subcategories.length === 0) ? 0.6 : 1
+              }}
+            >
+              {selectedSubcategory ? subcategories.find(c => c.id === selectedSubcategory)?.name || 'Cont' : 'Cont'}
+              <ChevronDown size={16} />
+            </button>
+            {openDropdown === 'subcategory' && subcategories.length > 0 && (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                marginTop: '8px',
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                boxShadow: '0px 10px 38px -10px rgba(22, 23, 24, 0.35), 0px 10px 20px -15px rgba(22, 23, 24, 0.2)',
+                minWidth: '200px',
+                zIndex: 100,
+                overflow: 'hidden'
+              }}>
+                <div
+                  onClick={() => { setSelectedSubcategory(''); setOpenDropdown(null); }}
+                  style={{
+                    padding: '12px 16px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    color: !selectedSubcategory ? 'rgba(30, 172, 200, 1)' : 'rgba(55, 65, 81, 1)',
+                    backgroundColor: !selectedSubcategory ? 'rgba(30, 172, 200, 0.05)' : 'transparent',
+                    borderBottom: '1px solid rgba(229, 231, 235, 0.5)'
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(30, 172, 200, 0.05)')}
+                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = !selectedSubcategory ? 'rgba(30, 172, 200, 0.05)' : 'transparent')}
+                >
+                  Toate
+                </div>
+                {subcategories.map(subcat => (
+                  <div
+                    key={subcat.id}
+                    onClick={() => { setSelectedSubcategory(subcat.id); setOpenDropdown(null); }}
+                    style={{
+                      padding: '12px 16px',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      color: selectedSubcategory === subcat.id ? 'rgba(30, 172, 200, 1)' : 'rgba(55, 65, 81, 1)',
+                      backgroundColor: selectedSubcategory === subcat.id ? 'rgba(30, 172, 200, 0.05)' : 'transparent'
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(30, 172, 200, 0.05)')}
+                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = selectedSubcategory === subcat.id ? 'rgba(30, 172, 200, 0.05)' : 'transparent')}
+                  >
+                    {subcat.name}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Date Filter */}
           <div 
@@ -1112,9 +1295,11 @@ export default function ExpensesPage() {
                             setPaymentModalData({
                               isOpen: true,
                               index,
+                              expenseId: row.id,
                               supplierName: row.provider,
                               amount: `${row.amount},${row.decimals}`,
-                              currentlyPaid: row.paid
+                              currentlyPaid: row.paid,
+                              isRecurring: row.isRecurring
                             });
                           }}
                           style={{ display: 'flex', justifyContent: 'center' }}
