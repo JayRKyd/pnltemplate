@@ -1497,9 +1497,13 @@ export default function ExpensesPage() {
                         </td>
                         {Array.isArray(last6Months) && last6Months.length > 0 ? last6Months.map((monthInfo, idx) => {
                           // Check payment status - try year-specific key first, then fallback to simple key
-                          const yearMonthKey = `${monthInfo.year}-${monthInfo.key}`;
+                          // Backend uses English month keys (jan, feb, etc.), so we need to convert
+                          const englishMonthKeys = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+                          const englishMonthKey = englishMonthKeys[monthInfo.index];
+                          const yearMonthKey = `${monthInfo.year}-${englishMonthKey}`;
                           const payments = expense.payments as Record<string, boolean | undefined>;
-                          const isPaid = payments[yearMonthKey] ?? payments[monthInfo.key] ?? false;
+                          // Check both year-specific key and simple English key (backend stores both)
+                          const isPaid = payments[yearMonthKey] ?? payments[englishMonthKey] ?? false;
                           
                           return (
                             <td key={`${monthInfo.year}-${monthInfo.index}-${idx}`} style={{ width: '81.8px' }}>
