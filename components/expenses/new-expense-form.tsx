@@ -786,14 +786,24 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
       }
 
       // Upload new attachments (only files that aren't already uploaded)
+      let attachmentUploadFailed = false;
       for (const file of uploadedFiles) {
         // Skip existing attachments that were loaded from the server
         if (file.isExisting) {
           continue;
         }
         
-        // Upload new files
-        const base64Data = file.preview.split(",")[1];
+        // Extract base64 data from data URL
+        const base64Data = file.preview.includes(",") 
+          ? file.preview.split(",")[1] 
+          : file.preview;
+        
+        if (!base64Data || base64Data.trim() === "") {
+          console.error("Empty base64 data for file:", file.name);
+          attachmentUploadFailed = true;
+          continue;
+        }
+        
         try {
           await uploadAttachment(savedExpenseId, teamId, {
             name: file.name,
@@ -803,8 +813,13 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
           });
         } catch (err) {
           console.error("Failed to upload attachment:", err);
+          attachmentUploadFailed = true;
           // Continue with other files even if one fails
         }
+      }
+      
+      if (attachmentUploadFailed) {
+        console.warn("Some attachments failed to upload. Expense saved but attachments may be missing.");
       }
 
       // Only submit for approval if creating new expense and not draft

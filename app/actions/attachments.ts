@@ -46,13 +46,35 @@ export async function uploadAttachment(
     throw new Error("No user in session");
   }
 
+  // Validate base64 data
+  if (!file.base64 || file.base64.trim() === "") {
+    console.error("Empty base64 data received for file:", file.name);
+    throw new Error("Empty file content");
+  }
+
   // Generate unique file path
   const timestamp = Date.now();
   const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
   const filePath = `${teamId}/${expenseId}/${timestamp}-${safeName}`;
 
   // Decode base64 and upload to storage
-  const fileBuffer = Buffer.from(file.base64, "base64");
+  let fileBuffer: Buffer;
+  try {
+    fileBuffer = Buffer.from(file.base64, "base64");
+    if (fileBuffer.length === 0) {
+      throw new Error("Decoded buffer is empty");
+    }
+  } catch (decodeError) {
+    console.error("Failed to decode base64:", decodeError);
+    throw new Error("Invalid file encoding");
+  }
+
+  // Check file size (10MB limit)
+  if (fileBuffer.length > 10 * 1024 * 1024) {
+    throw new Error("File too large. Maximum size is 10MB.");
+  }
+
+  console.log(`Uploading file: ${file.name}, size: ${fileBuffer.length} bytes, type: ${file.type}, path: ${filePath}`);
   
   const { error: uploadError } = await supabaseAdmin.storage
     .from("expense-attachments")
@@ -62,8 +84,8 @@ export async function uploadAttachment(
     });
 
   if (uploadError) {
-    console.error("Failed to upload file to storage", uploadError);
-    throw new Error(uploadError.message);
+    console.error("Failed to upload file to storage:", uploadError);
+    throw new Error(`Storage upload failed: ${uploadError.message}`);
   }
 
   // Create attachment record
