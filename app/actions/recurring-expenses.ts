@@ -369,7 +369,8 @@ export interface RecurringExpenseWithPayments extends RecurringExpense {
 
 export async function getRecurringExpensesWithPayments(
   teamId: string,
-  year: number = new Date().getFullYear()
+  startDate: string, // YYYY-MM-DD
+  endDate: string    // YYYY-MM-DD
 ): Promise<RecurringExpenseWithPayments[]> {
   // Get all recurring expenses
   const { data: recurringExpenses, error: recError } = await supabase
@@ -393,10 +394,8 @@ export async function getRecurringExpensesWithPayments(
     return [];
   }
 
-  // Get all generated expenses for these recurring templates for the given year
+  // Get all generated expenses for these recurring templates for the given date range
   const recurringIds = recurringExpenses.map(r => r.id);
-  const startDate = `${year}-01-01`;
-  const endDate = `${year}-12-31`;
 
   const { data: expenses, error: expError } = await supabase
     .from("team_expenses")
@@ -417,10 +416,15 @@ export async function getRecurringExpensesWithPayments(
   (expenses || []).forEach(exp => {
     if (!exp.recurring_expense_id) return;
     
-    // Use getUTCMonth() to avoid timezone issues - dates are stored as YYYY-MM-DD (UTC)
-    const month = new Date(exp.expense_date).getUTCMonth();
+    // Use getUTCMonth() and getUTCFullYear() to avoid timezone issues - dates are stored as YYYY-MM-DD (UTC)
+    const expenseDate = new Date(exp.expense_date + 'T00:00:00Z'); // Ensure UTC parsing
+    const month = expenseDate.getUTCMonth();
+    const year = expenseDate.getUTCFullYear();
     const monthKeys = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
     const monthKey = monthKeys[month];
+    
+    // Create a unique key that includes year to handle year boundaries
+    const yearMonthKey = `${year}-${monthKey}`;
     
     if (!paymentsMap.has(exp.recurring_expense_id)) {
       paymentsMap.set(exp.recurring_expense_id, {});
@@ -428,7 +432,9 @@ export async function getRecurringExpensesWithPayments(
     
     const payments = paymentsMap.get(exp.recurring_expense_id)!;
     // Only mark as paid if payment_status is 'paid'
+    // Store both the simple key (for backward compatibility) and year-specific key
     payments[monthKey] = exp.payment_status === 'paid';
+    payments[yearMonthKey] = exp.payment_status === 'paid';
   });
 
   // Combine data

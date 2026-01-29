@@ -231,7 +231,43 @@ export default function ExpensesPage() {
   }, [searchParams]);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchValue, setSearchValue] = useState('');
-  const [selectedYear] = useState(new Date().getFullYear());
+  
+  // Calculate last 6 months dynamically (UTC-based)
+  const last6Months = useMemo(() => {
+    const now = new Date();
+    const currentUTCMonth = now.getUTCMonth(); // 0-11
+    const currentUTCYear = now.getUTCFullYear();
+    
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const monthDate = new Date(Date.UTC(currentUTCYear, currentUTCMonth - i, 1));
+      const monthIndex = monthDate.getUTCMonth();
+      const year = monthDate.getUTCFullYear();
+      
+      months.push({
+        index: monthIndex, // 0-11 for data mapping
+        year: year,
+        displayName: ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][monthIndex],
+        key: ['ian', 'feb', 'mar', 'apr', 'mai', 'iun', 'iul', 'aug', 'sep', 'oct', 'nov', 'dec'][monthIndex]
+      });
+    }
+    return months;
+  }, []); // Recalculate when component mounts (could add dependency if needed)
+  
+  // Calculate date range for backend query
+  const dateRange = useMemo(() => {
+    if (last6Months.length === 0) return { startDate: '', endDate: '' };
+    
+    const firstMonth = last6Months[0];
+    const lastMonth = last6Months[last6Months.length - 1];
+    const startDate = `${firstMonth.year}-${String(firstMonth.index + 1).padStart(2, '0')}-01`;
+    
+    // Get last day of last month
+    const lastDayOfMonth = new Date(Date.UTC(lastMonth.year, lastMonth.index + 1, 0)).getUTCDate();
+    const endDate = `${lastMonth.year}-${String(lastMonth.index + 1).padStart(2, '0')}-${lastDayOfMonth}`;
+    
+    return { startDate, endDate };
+  }, [last6Months]);
   const [paymentModalData, setPaymentModalData] = useState<{
     isOpen: boolean;
     index: number;
@@ -247,6 +283,7 @@ export default function ExpensesPage() {
     supplierName: string;
     monthKey: string;
     monthIndex: number;
+    year: number;
     currentlyPaid: boolean;
   } | null>(null);
 
@@ -407,18 +444,18 @@ export default function ExpensesPage() {
   }, [params.teamId, activeSubTab, searchValue, selectedCategory, selectedSubcategory, selectedStatus, selectedPayment, dateFrom, dateTo]);
 
   const loadRecurringExpenses = useCallback(async () => {
-    if (!params.teamId) return;
+    if (!params.teamId || !dateRange.startDate || !dateRange.endDate) return;
 
     setRecurringLoading(true);
     try {
-      const data = await getRecurringExpensesWithPayments(params.teamId, selectedYear);
+      const data = await getRecurringExpensesWithPayments(params.teamId, dateRange.startDate, dateRange.endDate);
       setAllRecurringExpenses(data);
     } catch (err) {
       console.error("Failed to fetch recurring expenses:", err);
     } finally {
       setRecurringLoading(false);
     }
-  }, [params.teamId, selectedYear]);
+  }, [params.teamId, dateRange.startDate, dateRange.endDate]);
 
   // Filter recurring expenses based on selected filters
   useEffect(() => {
@@ -480,7 +517,7 @@ export default function ExpensesPage() {
       await updateRecurringPaymentStatus(
         recurringPaymentModal.recurringId,
         params.teamId,
-        selectedYear,
+        recurringPaymentModal.year,
         recurringPaymentModal.monthIndex,
         !recurringPaymentModal.currentlyPaid
       );
@@ -1369,9 +1406,9 @@ export default function ExpensesPage() {
                     }}>
                       RON
                     </th>
-                    {['JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].map(month => (
+                    {last6Months.map((month, idx) => (
                       <th 
-                        key={month} 
+                        key={`${month.year}-${month.index}-${idx}`} 
                         style={{ 
                           width: '81.8px',
                           textAlign: 'center', 
@@ -1381,7 +1418,7 @@ export default function ExpensesPage() {
                           letterSpacing: '0.6px'
                         }}
                       >
-                        {month}
+                        {month.displayName}
                       </th>
                     ))}
                   </tr>
@@ -1392,8 +1429,6 @@ export default function ExpensesPage() {
                     const amountParts = formatDisplayAmount(amount).split(',');
                     const mainAmount = amountParts[0] + ',';
                     const decimals = amountParts[1] || '00';
-                    const monthKeys = ['jul', 'aug', 'sep', 'oct', 'nov', 'dec'] as const;
-                    const monthIndices = [6, 7, 8, 9, 10, 11]; // July to December
                     
                     return (
                       <tr 
@@ -1436,31 +1471,38 @@ export default function ExpensesPage() {
                             </span>
                           </div>
                         </td>
-                        {monthKeys.map((monthKey, idx) => (
-                          <td key={monthKey} style={{ width: '81.8px' }}>
-                            <div 
-                              style={{ display: 'flex', justifyContent: 'center', cursor: 'pointer' }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setRecurringPaymentModal({
-                                  isOpen: true,
-                                  recurringId: expense.id,
-                                  supplierName: expense.supplier || '-',
-                                  monthKey,
-                                  monthIndex: monthIndices[idx],
-                                  currentlyPaid: !!expense.payments[monthKey]
-                                });
-                              }}
-                            >
-                              <MonthPaymentIcon paid={!!expense.payments[monthKey]} />
-                            </div>
-                          </td>
-                        ))}
+                        {last6Months.map((monthInfo, idx) => {
+                          // Check payment status - try year-specific key first, then fallback to simple key
+                          const yearMonthKey = `${monthInfo.year}-${monthInfo.key}`;
+                          const isPaid = expense.payments[yearMonthKey] ?? expense.payments[monthInfo.key] ?? false;
+                          
+                          return (
+                            <td key={`${monthInfo.year}-${monthInfo.index}-${idx}`} style={{ width: '81.8px' }}>
+                              <div 
+                                style={{ display: 'flex', justifyContent: 'center', cursor: 'pointer' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRecurringPaymentModal({
+                                    isOpen: true,
+                                    recurringId: expense.id,
+                                    supplierName: expense.supplier || '-',
+                                    monthKey: monthInfo.key,
+                                    monthIndex: monthInfo.index,
+                                    year: monthInfo.year,
+                                    currentlyPaid: isPaid
+                                  });
+                                }}
+                              >
+                                <MonthPaymentIcon paid={isPaid} />
+                              </div>
+                            </td>
+                          );
+                        })}
                       </tr>
                     );
                   }) : (
                     <tr>
-                      <td colSpan={9} style={{ padding: '48px', textAlign: 'center', color: 'rgba(107, 114, 128, 1)' }}>
+                      <td colSpan={last6Months.length + 3} style={{ padding: '48px', textAlign: 'center', color: 'rgba(107, 114, 128, 1)' }}>
                         Nu exista cheltuieli recurente. Apasa &quot;Recurent Nou +&quot; pentru a adauga.
                       </td>
                     </tr>
