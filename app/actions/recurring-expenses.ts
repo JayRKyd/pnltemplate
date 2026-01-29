@@ -289,9 +289,11 @@ export async function findMatchingRecurring(
 }
 
 // Get expenses generated from a recurring template
+// Optionally filter by year to match list view behavior
 export async function getGeneratedExpenses(
   recurringId: string,
-  teamId: string
+  teamId: string,
+  year?: number
 ): Promise<{
   id: string;
   expense_uid: string;
@@ -300,13 +302,21 @@ export async function getGeneratedExpenses(
   status: string;
   is_recurring_placeholder: boolean;
 }[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from("team_expenses")
     .select("id, expense_uid, expense_date, amount, status, is_recurring_placeholder")
     .eq("recurring_expense_id", recurringId)
     .eq("team_id", teamId)
-    .is("deleted_at", null)
-    .order("expense_date", { ascending: false });
+    .is("deleted_at", null);
+
+  // Filter by year if provided (same as list view)
+  if (year) {
+    const startDate = `${year}-01-01`;
+    const endDate = `${year}-12-31`;
+    query = query.gte("expense_date", startDate).lte("expense_date", endDate);
+  }
+
+  const { data, error } = await query.order("expense_date", { ascending: false });
 
   if (error) {
     console.error("[getGeneratedExpenses] Error:", error);

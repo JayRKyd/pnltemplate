@@ -76,10 +76,11 @@ export default function RecurringExpenseDetailPage() {
       
       setLoading(true);
       try {
+        const currentYear = new Date().getFullYear();
         const [expense, cats, generatedExpenses] = await Promise.all([
           getRecurringExpense(params.id),
           getCategoryTree(params.teamId),
-          getGeneratedExpenses(params.id, params.teamId)
+          getGeneratedExpenses(params.id, params.teamId, currentYear)
         ]);
         
         setCategories(cats);
@@ -107,19 +108,20 @@ export default function RecurringExpenseDetailPage() {
           }
 
           // Load actual payment status for each month using same logic as list view
-          const currentYear = new Date().getFullYear();
+          // getGeneratedExpenses already filters by year, so we can use all returned expenses
           setMonthlyPayments(prev => {
             const expenseMap = new Map<number, boolean>();
             
             // Build payment map using same logic as getRecurringExpensesWithPayments
             generatedExpenses.forEach(exp => {
               const expDate = new Date(exp.expense_date);
-              // Only consider expenses from current year
-              if (expDate.getFullYear() === currentYear) {
-                const month = expDate.getMonth();
-                // Same logic as list view: paid if not placeholder OR status is 'paid'
-                expenseMap.set(month, !exp.is_recurring_placeholder || exp.status === 'paid');
-              }
+              const month = expDate.getMonth();
+              // Same logic as list view: paid if not placeholder OR status is 'paid'
+              // If multiple expenses exist for same month, mark as paid if ANY meet criteria
+              const currentStatus = expenseMap.get(month);
+              const newStatus = !exp.is_recurring_placeholder || exp.status === 'paid';
+              // Set to true if current is true OR new is true (OR logic)
+              expenseMap.set(month, currentStatus || newStatus);
             });
 
             return prev.map(mp => {
