@@ -367,6 +367,7 @@ export default function ExpensesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [expenses, setExpenses] = useState<TeamExpenseListItem[]>([]);
+  const [allRecurringExpenses, setAllRecurringExpenses] = useState<RecurringExpenseWithPayments[]>([]);
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpenseWithPayments[]>([]);
   const [loading, setLoading] = useState(true);
   const [recurringLoading, setRecurringLoading] = useState(true);
@@ -459,7 +460,7 @@ export default function ExpensesPage() {
   }, [params.teamId]);
 
   const loadExpenses = useCallback(async () => {
-    if (!params.teamId) return;
+    if (!params.teamId || activeSubTab !== 'Cheltuieli') return;
 
     setLoading(true);
     try {
@@ -486,7 +487,7 @@ export default function ExpensesPage() {
     } finally {
       setLoading(false);
     }
-  }, [params.teamId, searchValue, selectedCategory, selectedStatus, selectedPayment, dateFrom, dateTo]);
+  }, [params.teamId, activeSubTab, searchValue, selectedCategory, selectedStatus, selectedPayment, dateFrom, dateTo]);
 
   const loadRecurringExpenses = useCallback(async () => {
     if (!params.teamId) return;
@@ -494,13 +495,55 @@ export default function ExpensesPage() {
     setRecurringLoading(true);
     try {
       const data = await getRecurringExpensesWithPayments(params.teamId, selectedYear);
-      setRecurringExpenses(data);
+      setAllRecurringExpenses(data);
     } catch (err) {
       console.error("Failed to fetch recurring expenses:", err);
     } finally {
       setRecurringLoading(false);
     }
   }, [params.teamId, selectedYear]);
+
+  // Filter recurring expenses based on selected filters
+  useEffect(() => {
+    if (activeSubTab !== 'Recurente') return;
+
+    let filtered = [...allRecurringExpenses];
+
+    // Category filter
+    if (selectedCategory) {
+      filtered = filtered.filter(exp => exp.category_id === selectedCategory);
+    }
+
+    // Search filter (supplier or description)
+    if (searchValue.trim()) {
+      const searchLower = searchValue.toLowerCase().trim();
+      filtered = filtered.filter(exp => 
+        (exp.supplier?.toLowerCase().includes(searchLower)) ||
+        (exp.description?.toLowerCase().includes(searchLower))
+      );
+    }
+
+    // Date filter (filter by created_at date)
+    if (dateFrom || dateTo) {
+      filtered = filtered.filter(exp => {
+        if (!exp.created_at) return false;
+        const createdDate = new Date(exp.created_at);
+        const fromDate = dateFrom ? new Date(dateFrom) : null;
+        const toDate = dateTo ? new Date(dateTo) : null;
+        
+        if (fromDate && createdDate < fromDate) return false;
+        if (toDate) {
+          // Include the entire day for "to" date
+          const toDateEnd = new Date(toDate);
+          toDateEnd.setHours(23, 59, 59, 999);
+          if (createdDate > toDateEnd) return false;
+        }
+        return true;
+      });
+    }
+
+    setRecurringExpenses(filtered);
+  }, [allRecurringExpenses, selectedCategory, searchValue, dateFrom, dateTo, activeSubTab]);
 
   // Load all data in parallel for better performance
   useEffect(() => {
@@ -552,6 +595,13 @@ export default function ExpensesPage() {
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const paginatedData = displayData.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    if (activeSubTab === 'Cheltuieli') {
+      setCurrentPage(1);
+    }
+  }, [searchValue, selectedCategory, selectedStatus, selectedPayment, dateFrom, dateTo, activeSubTab]);
 
   // Reset to page 1 when filters change and current page is out of bounds
   useEffect(() => {

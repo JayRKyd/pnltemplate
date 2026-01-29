@@ -138,7 +138,19 @@ export async function getAttachmentUrl(filePath: string): Promise<string> {
 
   if (error) {
     console.error("Failed to create signed URL", error);
-    throw new Error(error.message);
+    console.error("File path:", filePath);
+    // Common errors:
+    // - "Object not found" - file was deleted or path is wrong
+    // - "Not found" - file doesn't exist
+    // - "Invalid API key" - service role key issue
+    if (error.message?.includes("not found") || error.message?.includes("Not found")) {
+      throw new Error(`File not found in storage: ${filePath}`);
+    }
+    throw new Error(`Failed to create signed URL: ${error.message}`);
+  }
+
+  if (!data?.signedUrl) {
+    throw new Error("Signed URL was not returned from storage");
   }
 
   return data.signedUrl;

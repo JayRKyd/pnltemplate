@@ -289,19 +289,44 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         const expense = await getExpense(expenseId);
         if (!expense) {
           console.error("Expense not found");
+          setLoadingExpense(false);
+          // Redirect back to expenses list
+          router.push(`/dashboard/${teamId}/expenses`);
           return;
         }
 
-        // Load attachments
+        // Load attachments with error handling for each
         const attachments = await getExpenseAttachments(expenseId);
-        const attachmentFiles = await Promise.all(
-          attachments.map(async (att) => {
+        const attachmentPromises = attachments.map(async (att) => {
+          try {
             const url = await getAttachmentUrl(att.file_path);
-            const response = await fetch(url);
+            
+            // Add timeout to fetch (10 seconds)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            
+            let response: Response;
+            try {
+              response = await fetch(url, { signal: controller.signal });
+              clearTimeout(timeoutId);
+            } catch (fetchErr: any) {
+              clearTimeout(timeoutId);
+              if (fetchErr.name === 'AbortError') {
+                throw new Error('Request timeout - file may not exist or URL is invalid');
+              }
+              throw fetchErr;
+            }
+            
+            if (!response.ok) {
+              console.error(`Failed to fetch attachment ${att.file_name}: ${response.status} ${response.statusText}`);
+              return null;
+            }
+            
             const blob = await response.blob();
-            const base64 = await new Promise<string>((resolve) => {
+            const base64 = await new Promise<string>((resolve, reject) => {
               const reader = new FileReader();
               reader.onloadend = () => resolve(reader.result as string);
+              reader.onerror = () => reject(new Error('Failed to read file'));
               reader.readAsDataURL(blob);
             });
             return {
@@ -311,8 +336,13 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
               size: att.file_size || 0,
               isExisting: true // Mark as existing attachment
             };
-          })
-        );
+          } catch (err) {
+            console.error(`Failed to load attachment ${att.file_name}:`, err);
+            return null;
+          }
+        });
+        const attachmentResults = await Promise.all(attachmentPromises);
+        const attachmentFiles = attachmentResults.filter((file): file is NonNullable<typeof file> => file !== null);
         setUploadedFiles(attachmentFiles);
 
         // Populate header fields
@@ -350,7 +380,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
       }
     }
     loadExpense();
-  }, [expenseId, teamId, getCurrentMonthYear]);
+  }, [expenseId, teamId, getCurrentMonthYear, router]);
 
   // Handle back navigation
   const handleBack = () => {
