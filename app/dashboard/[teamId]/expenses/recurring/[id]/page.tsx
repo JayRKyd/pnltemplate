@@ -48,20 +48,21 @@ export default function RecurringExpenseDetailPage() {
   const [monthlyPayments, setMonthlyPayments] = useState<MonthPayment[]>([]);
   const [updatingPayment, setUpdatingPayment] = useState<number | null>(null);
 
-  // Generate months from current date going back 12 months
+  // Generate months for current year (same as list view shows Jul-Dec)
+  // Show all 12 months of current year for consistency
   useEffect(() => {
     const months: MonthPayment[] = [];
-    const currentDate = new Date();
+    const currentYear = new Date().getFullYear();
     const romanianMonths = [
       'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
       'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
     ];
     
+    // Show all 12 months of the current year (Jan-Dec)
     for (let i = 0; i < 12; i++) {
-      const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
       months.push({
-        month: romanianMonths[date.getMonth()],
-        year: date.getFullYear(),
+        month: romanianMonths[i],
+        year: currentYear,
         paid: false // Default to unpaid, will be loaded from DB
       });
     }
@@ -105,22 +106,35 @@ export default function RecurringExpenseDetailPage() {
             setTva(formatAmount(vatAmount));
           }
 
-          // Load actual payment status for each month
+          // Load actual payment status for each month using same logic as list view
+          const currentYear = new Date().getFullYear();
           setMonthlyPayments(prev => {
-            const expenseMap = new Map<string, boolean>();
+            const expenseMap = new Map<number, boolean>();
+            
+            // Build payment map using same logic as getRecurringExpensesWithPayments
             generatedExpenses.forEach(exp => {
-              const date = new Date(exp.expense_date);
-              const key = `${date.getFullYear()}-${date.getMonth()}`;
-              // Mark as paid if status is 'paid' or if it's not a placeholder
-              expenseMap.set(key, exp.status === 'paid' || !exp.is_recurring_placeholder);
+              const expDate = new Date(exp.expense_date);
+              // Only consider expenses from current year
+              if (expDate.getFullYear() === currentYear) {
+                const month = expDate.getMonth();
+                // Same logic as list view: paid if not placeholder OR status is 'paid'
+                expenseMap.set(month, !exp.is_recurring_placeholder || exp.status === 'paid');
+              }
             });
 
             return prev.map(mp => {
-              const date = new Date(mp.year, getMonthIndex(mp.month), 1);
-              const key = `${date.getFullYear()}-${date.getMonth()}`;
+              // Only show paid status if month is in current year
+              if (mp.year === currentYear) {
+                const monthIndex = getMonthIndex(mp.month);
+                return {
+                  ...mp,
+                  paid: expenseMap.get(monthIndex) || false
+                };
+              }
+              // For other years, default to unpaid
               return {
                 ...mp,
-                paid: expenseMap.get(key) || false
+                paid: false
               };
             });
           });

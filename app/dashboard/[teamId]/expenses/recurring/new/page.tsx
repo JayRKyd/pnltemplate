@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { X, ChevronDown, Check } from 'lucide-react';
 import { getCategoryTree, CategoryWithChildren } from '@/app/actions/categories';
-import { createRecurringExpense } from '@/app/actions/recurring-expenses';
+import { createRecurringExpense, updateRecurringPaymentStatus } from '@/app/actions/recurring-expenses';
 
 interface MonthPayment {
   month: string;
@@ -36,21 +36,21 @@ export default function NewRecurringExpensePage() {
   // Monthly payments state - 12 months
   const [monthlyPayments, setMonthlyPayments] = useState<MonthPayment[]>([]);
 
-  // Generate months from current date going back 12 months
+  // Generate months for current year (all 12 months of 2026)
   useEffect(() => {
     const months: MonthPayment[] = [];
-    const currentDate = new Date();
+    const currentYear = new Date().getFullYear();
     const romanianMonths = [
       'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
       'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
     ];
     
+    // Show all 12 months of current year
     for (let i = 0; i < 12; i++) {
-      const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
       months.push({
-        month: romanianMonths[date.getMonth()],
-        year: date.getFullYear(),
-        paid: true // Default to paid for new expenses
+        month: romanianMonths[i],
+        year: currentYear,
+        paid: false // Default to unpaid
       });
     }
     setMonthlyPayments(months);
@@ -100,6 +100,15 @@ export default function NewRecurringExpensePage() {
     router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
   };
 
+  // Helper to get month index from Romanian name
+  const getMonthIndex = (monthName: string): number => {
+    const romanianMonths = [
+      'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
+      'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
+    ];
+    return romanianMonths.indexOf(monthName);
+  };
+
   const toggleMonthPayment = (index: number) => {
     setMonthlyPayments(prev => prev.map((mp, i) => 
       i === index ? { ...mp, paid: !mp.paid } : mp
@@ -115,7 +124,8 @@ export default function NewRecurringExpensePage() {
       const amountWithoutVat = parseAmount(sumaFaraTVA);
       const amount = amountWithoutVat || amountWithVat;
       
-      await createRecurringExpense({
+      // Create the recurring expense template
+      const recurring = await createRecurringExpense({
         teamId: params.teamId,
         amount: amount,
         amountWithVat: amountWithVat || undefined,
@@ -130,6 +140,25 @@ export default function NewRecurringExpensePage() {
         dayOfMonth: 1,
         startDate: new Date().toISOString().split('T')[0],
       });
+      
+      // Save payment status for each toggled month
+      const currentYear = new Date().getFullYear();
+      for (const mp of monthlyPayments) {
+        if (mp.paid) {
+          try {
+            await updateRecurringPaymentStatus(
+              recurring.id,
+              params.teamId,
+              mp.year,
+              getMonthIndex(mp.month),
+              true // paid
+            );
+          } catch (err) {
+            console.error(`Failed to save payment status for ${mp.month} ${mp.year}:`, err);
+            // Continue with other months even if one fails
+          }
+        }
+      }
       
       router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
     } catch (error) {
