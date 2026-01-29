@@ -380,7 +380,8 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
       }
     }
     loadExpense();
-  }, [expenseId, teamId, getCurrentMonthYear, router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseId, teamId]);
 
   // Handle back navigation
   const handleBack = () => {
