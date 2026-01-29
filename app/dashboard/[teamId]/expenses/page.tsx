@@ -234,24 +234,48 @@ export default function ExpensesPage() {
   
   // Calculate last 6 months dynamically (UTC-based)
   const last6Months = useMemo(() => {
-    const now = new Date();
-    const currentUTCMonth = now.getUTCMonth(); // 0-11
-    const currentUTCYear = now.getUTCFullYear();
-    
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const monthDate = new Date(Date.UTC(currentUTCYear, currentUTCMonth - i, 1));
-      const monthIndex = monthDate.getUTCMonth();
-      const year = monthDate.getUTCFullYear();
+    try {
+      const now = new Date();
+      const currentUTCMonth = now.getUTCMonth(); // 0-11
+      const currentUTCYear = now.getUTCFullYear();
       
-      months.push({
-        index: monthIndex, // 0-11 for data mapping
+      const months = [];
+      for (let i = 5; i >= 0; i--) {
+        // Calculate month and year, handling year rollover
+        let targetMonth = currentUTCMonth - i;
+        let targetYear = currentUTCYear;
+        
+        // Handle negative months (previous year)
+        while (targetMonth < 0) {
+          targetMonth += 12;
+          targetYear -= 1;
+        }
+        
+        const monthDate = new Date(Date.UTC(targetYear, targetMonth, 1));
+        const monthIndex = monthDate.getUTCMonth();
+        const year = monthDate.getUTCFullYear();
+        
+        months.push({
+          index: monthIndex, // 0-11 for data mapping
+          year: year,
+          displayName: ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][monthIndex],
+          key: ['ian', 'feb', 'mar', 'apr', 'mai', 'iun', 'iul', 'aug', 'sep', 'oct', 'nov', 'dec'][monthIndex]
+        });
+      }
+      return months;
+    } catch (error) {
+      console.error('Error calculating last 6 months:', error);
+      // Fallback to current month only
+      const now = new Date();
+      const month = now.getUTCMonth();
+      const year = now.getUTCFullYear();
+      return [{
+        index: month,
         year: year,
-        displayName: ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][monthIndex],
-        key: ['ian', 'feb', 'mar', 'apr', 'mai', 'iun', 'iul', 'aug', 'sep', 'oct', 'nov', 'dec'][monthIndex]
-      });
+        displayName: ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][month],
+        key: ['ian', 'feb', 'mar', 'apr', 'mai', 'iun', 'iul', 'aug', 'sep', 'oct', 'nov', 'dec'][month]
+      }];
     }
-    return months;
   }, []); // Recalculate when component mounts (could add dependency if needed)
   
   // Calculate date range for backend query
@@ -1406,7 +1430,7 @@ export default function ExpensesPage() {
                     }}>
                       RON
                     </th>
-                    {last6Months.map((month, idx) => (
+                    {Array.isArray(last6Months) && last6Months.length > 0 ? last6Months.map((month, idx) => (
                       <th 
                         key={`${month.year}-${month.index}-${idx}`} 
                         style={{ 
@@ -1420,7 +1444,7 @@ export default function ExpensesPage() {
                       >
                         {month.displayName}
                       </th>
-                    ))}
+                    )) : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -1471,7 +1495,7 @@ export default function ExpensesPage() {
                             </span>
                           </div>
                         </td>
-                        {last6Months.map((monthInfo, idx) => {
+                        {Array.isArray(last6Months) && last6Months.length > 0 ? last6Months.map((monthInfo, idx) => {
                           // Check payment status - try year-specific key first, then fallback to simple key
                           const yearMonthKey = `${monthInfo.year}-${monthInfo.key}`;
                           const payments = expense.payments as Record<string, boolean | undefined>;
@@ -1498,7 +1522,7 @@ export default function ExpensesPage() {
                               </div>
                             </td>
                           );
-                        })}
+                        }) : null}
                       </tr>
                     );
                   }) : (
