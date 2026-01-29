@@ -1532,7 +1532,8 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
             flexDirection: 'column',
             boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
             flexShrink: 0,
-            alignSelf: 'flex-start'
+            alignSelf: 'flex-start',
+            position: 'relative'
           }}>
             {uploadedFiles.length > 0 ? (
               <>
