@@ -417,7 +417,8 @@ export async function getRecurringExpensesWithPayments(
   (expenses || []).forEach(exp => {
     if (!exp.recurring_expense_id) return;
     
-    const month = new Date(exp.expense_date).getMonth();
+    // Use getUTCMonth() to avoid timezone issues - dates are stored as YYYY-MM-DD (UTC)
+    const month = new Date(exp.expense_date).getUTCMonth();
     const monthKeys = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
     const monthKey = monthKeys[month];
     
