@@ -108,38 +108,35 @@ export default function RecurringExpenseDetailPage() {
           }
 
           // Load actual payment status for each month using same logic as list view
-          // getGeneratedExpenses already filters by year, so we can use all returned expenses
-          setMonthlyPayments(prev => {
-            const expenseMap = new Map<number, boolean>();
-            
-            // Build payment map using same logic as getRecurringExpensesWithPayments
-            generatedExpenses.forEach(exp => {
-              const expDate = new Date(exp.expense_date);
-              const month = expDate.getMonth();
-              // Same logic as list view: paid if not placeholder OR status is 'paid'
-              // If multiple expenses exist for same month, mark as paid if ANY meet criteria
-              const currentStatus = expenseMap.get(month);
-              const newStatus = !exp.is_recurring_placeholder || exp.status === 'paid';
-              // Set to true if current is true OR new is true (OR logic)
-              expenseMap.set(month, currentStatus || newStatus);
-            });
-
-            return prev.map(mp => {
-              // Only show paid status if month is in current year
-              if (mp.year === currentYear) {
-                const monthIndex = getMonthIndex(mp.month);
-                return {
-                  ...mp,
-                  paid: expenseMap.get(monthIndex) || false
-                };
-              }
-              // For other years, default to unpaid
-              return {
-                ...mp,
-                paid: false
-              };
-            });
+          // Build payment map from database
+          const expenseMap = new Map<number, boolean>();
+          
+          // Build payment map using same logic as getRecurringExpensesWithPayments
+          generatedExpenses.forEach(exp => {
+            const expDate = new Date(exp.expense_date);
+            const month = expDate.getMonth();
+            // Same logic as list view: paid if not placeholder OR status is 'paid'
+            // If multiple expenses exist for same month, mark as paid if ANY meet criteria
+            const currentStatus = expenseMap.get(month);
+            const newStatus = !exp.is_recurring_placeholder || exp.status === 'paid';
+            // Set to true if current is true OR new is true (OR logic)
+            expenseMap.set(month, currentStatus || newStatus);
           });
+
+          // Generate all 12 months with payment status from DB
+          // This avoids race condition with the initialization useEffect
+          const romanianMonths = [
+            'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
+            'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
+          ];
+          
+          const updatedPayments: MonthPayment[] = romanianMonths.map((month, index) => ({
+            month,
+            year: currentYear,
+            paid: expenseMap.get(index) || false
+          }));
+          
+          setMonthlyPayments(updatedPayments);
         }
       } catch (error) {
         console.error('Failed to load recurring expense:', error);
