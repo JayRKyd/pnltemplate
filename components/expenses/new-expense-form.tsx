@@ -1525,19 +1525,14 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
           {/* Right Side Document Preview */}
           <div style={{
             width: '740px',
-            height: 'calc(100vh - 200px)',
-            maxHeight: '800px',
-            minHeight: '500px',
             backgroundColor: 'rgba(255, 255, 255, 0.7)',
             border: '1px solid rgba(229, 231, 235, 0.3)',
             borderRadius: '16px',
             display: 'flex',
             flexDirection: 'column',
             boxShadow: '0px 4px 16px rgba(0, 0, 0, 0.06)',
-            position: 'sticky',
-            top: '100px',
             flexShrink: 0,
-            overflow: 'hidden'
+            alignSelf: 'flex-start'
           }}>
             {uploadedFiles.length > 0 ? (
               <>
@@ -1597,40 +1592,27 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                   </div>
                 )}
 
-                {/* Preview Area - fits within card */}
+                {/* Preview Area - image takes full width */}
                 <div style={{ 
-                  flex: 1, 
                   position: 'relative',
-                  overflow: imageZoom > 1 ? 'auto' : 'hidden',
                   padding: uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? '60px 16px 16px 16px' : '0'
                 }}>
                   {/* Preview Image/PDF */}
                   {uploadedFiles[activePreviewIndex]?.type.startsWith('image/') ? (
-                    <div style={{
-                      width: imageZoom > 1 ? `${700 * imageZoom}px` : '100%',
-                      height: imageZoom > 1 ? 'auto' : '100%',
-                      display: 'flex',
-                      justifyContent: 'center',
-                      alignItems: 'center'
-                    }}>
-                      <img 
-                        src={uploadedFiles[activePreviewIndex].preview} 
-                        alt="Document preview" 
-                        style={{ 
-                          maxWidth: imageZoom === 1 ? '100%' : `${700 * imageZoom}px`,
-                          maxHeight: imageZoom === 1 ? '100%' : 'none',
-                          width: imageZoom > 1 ? `${700 * imageZoom}px` : 'auto',
-                          height: 'auto',
-                          objectFit: 'contain',
-                          cursor: imageZoom > 1 ? 'grab' : 'default',
-                          transition: 'all 0.2s ease'
-                        }} 
-                      />
-                    </div>
+                    <img 
+                      src={uploadedFiles[activePreviewIndex].preview} 
+                      alt="Document preview" 
+                      style={{ 
+                        width: `${100 * imageZoom}%`,
+                        height: 'auto',
+                        display: 'block',
+                        transition: 'all 0.2s ease'
+                      }} 
+                    />
                   ) : (
                     <iframe 
                       src={uploadedFiles[activePreviewIndex].preview} 
-                      style={{ width: '100%', height: '100%', border: 'none' }}
+                      style={{ width: '100%', height: '800px', border: 'none' }}
                       title="Document preview"
                     />
                   )}
@@ -1665,7 +1647,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                 </button>
               </>
             ) : (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}>
+              <div style={{ minHeight: '400px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}>
                 <Upload size={48} style={{ color: 'rgba(209, 213, 220, 1)' }} />
                 <span style={{ color: 'rgba(153, 161, 175, 1)', fontSize: '15px', fontWeight: 300 }}>Documentul va aparea aici</span>
               </div>

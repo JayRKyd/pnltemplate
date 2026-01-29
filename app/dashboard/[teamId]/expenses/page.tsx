@@ -13,161 +13,6 @@ import { getTeamCategories, ExpenseCategory } from "@/app/actions/categories";
 
 type TabType = 'Cheltuieli' | 'Recurente';
 
-// Mock data matching the Figma exactly
-const mockTableData = [
-  {
-    status: 'Final' as const,
-    date: '15.mar.25',
-    type: 'Factura',
-    provider: 'Expert Conta SRL',
-    description: 'Servicii contabilitate - Trimestrul 1',
-    amount: '1.270',
-    decimals: '00',
-    paid: false,
-  },
-  {
-    status: 'Draft' as const,
-    date: '20.nov.25',
-    type: 'Factura',
-    provider: 'OpenAI OpCo LLC',
-    description: 'API Credits - ChatGPT & GPT-4',
-    amount: '320',
-    decimals: '00',
-    paid: true,
-  },
-  {
-    status: 'Final' as const,
-    date: '18.nov.25',
-    type: 'Factura',
-    provider: 'IKEA Business Romania',
-    description: 'Mobilier birou - 4 birouri ergonomice',
-    amount: '4.899',
-    decimals: '00',
-    paid: false,
-  },
-  {
-    status: 'Recurent' as const,
-    date: '05.oct.25',
-    type: 'Factura',
-    provider: 'Construct & Renovate SRL',
-    description: 'Renovare spatiu lucru - Etaj 1',
-    amount: '27.000',
-    decimals: '00',
-    paid: true,
-  },
-  {
-    status: 'Final' as const,
-    date: '25.nov.25',
-    type: 'Factura',
-    provider: 'Adobe Systems Software',
-    description: 'Creative Cloud All Apps - 15 users',
-    amount: '1.259',
-    decimals: '00',
-    paid: false,
-  },
-  {
-    status: 'Draft' as const,
-    date: '22.nov.25',
-    type: 'Bon',
-    provider: 'Trattoria Il Calcio',
-    description: 'Team building lunch - 22 persoane',
-    amount: '1.450',
-    decimals: '00',
-    paid: true,
-  },
-  {
-    status: 'Final' as const,
-    date: '18.oct.25',
-    type: 'Factura',
-    provider: 'Office Depot Romania',
-    description: 'Materiale birou & papetarie',
-    amount: '840',
-    decimals: '00',
-    paid: false,
-  },
-  {
-    status: 'Final' as const,
-    date: '12.oct.25',
-    type: 'Factura',
-    provider: 'Google Ireland Limited',
-    description: 'Google Workspace Business - 50 users',
-    amount: '3.850',
-    decimals: '00',
-    paid: true,
-  },
-  {
-    status: 'Recurent' as const,
-    date: '30.sep.25',
-    type: 'Factura',
-    provider: 'Fan Courier SA',
-    description: 'Servicii curierat septembrie',
-    amount: '678',
-    decimals: '00',
-    paid: false,
-  },
-  {
-    status: 'Final' as const,
-    date: '15.sep.25',
-    type: 'Bon',
-    provider: 'Starbucks Romania',
-    description: 'Intalniri cu clienti & catering',
-    amount: '445',
-    decimals: '00',
-    paid: true,
-  },
-  {
-    status: 'Final' as const,
-    date: '28.aug.25',
-    type: 'Factura',
-    provider: 'Zoom Video Communications',
-    description: 'Zoom Business - 20 host licenses',
-    amount: '1.890',
-    decimals: '00',
-    paid: false,
-  },
-  {
-    status: 'Draft' as const,
-    date: '10.aug.25',
-    type: 'Bon',
-    provider: 'OMV Petrom SA',
-    description: 'Combustibil auto - card flotă',
-    amount: '1.520',
-    decimals: '00',
-    paid: true,
-  },
-  {
-    status: 'Final' as const,
-    date: '22.iul.25',
-    type: 'Factura',
-    provider: 'AWS Europe SARL',
-    description: 'Cloud hosting & storage infrastructure',
-    amount: '2.200',
-    decimals: '00',
-    paid: false,
-  },
-  {
-    status: 'Final' as const,
-    date: '05.iul.25',
-    type: 'Chitanta',
-    provider: 'Carrefour Romania SA',
-    description: 'Materiale prezentari & conferinte',
-    amount: '585',
-    decimals: '00',
-    paid: true,
-  },
-  {
-    status: 'Final' as const,
-    date: '18.iun.25',
-    type: 'Factura',
-    provider: 'Slack Technologies LLC',
-    description: 'Slack Business+ - 45 users',
-    amount: '1.750',
-    decimals: '00',
-    paid: false,
-  },
-];
-
-
 const getStatusStyles = (status: string) => {
   switch (status) {
     case 'Final':
@@ -574,20 +419,18 @@ export default function ExpensesPage() {
     }
   };
 
-  // Use real data if available, otherwise fall back to mock
-  const displayData = expenses.length > 0 
-    ? expenses.map(exp => ({
-        status: (exp.status === 'approved' ? 'Final' : exp.status === 'draft' ? 'Draft' : 'Final') as 'Final' | 'Draft' | 'Recurent',
-        date: formatExpenseDate(exp.expense_date),
-        type: exp.doc_type || 'Factura',
-        provider: exp.supplier || '-',
-        description: exp.description || '-',
-        amount: formatAmountMain(exp.amount || 0),
-        decimals: formatAmountDecimals(exp.amount || 0),
-        paid: exp.status === 'paid',
-        id: exp.id
-      }))
-    : mockTableData;
+  // Map expenses to display format
+  const displayData = expenses.map(exp => ({
+    status: (exp.status === 'approved' ? 'Final' : exp.status === 'draft' ? 'Draft' : 'Final') as 'Final' | 'Draft' | 'Recurent',
+    date: formatExpenseDate(exp.expense_date),
+    type: exp.doc_type || 'Factura',
+    provider: exp.supplier || '-',
+    description: exp.description || '-',
+    amount: formatAmountMain(exp.amount || 0),
+    decimals: formatAmountDecimals(exp.amount || 0),
+    paid: exp.status === 'paid',
+    id: exp.id
+  }));
 
   // Pagination calculations
   const totalItems = displayData.length;
@@ -1200,23 +1043,30 @@ export default function ExpensesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedData.map((row, index) => (
-                    <tr 
-                      key={index} 
-                      style={{
-                        height: '49px',
-                        borderBottom: '1px solid rgba(229, 231, 235, 0.3)',
-                        cursor: 'pointer',
-                        transition: 'background-color 0.2s'
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(240, 253, 250, 0.3)')}
-                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                      onClick={() => {
-                        if ('id' in row && row.id) {
-                          router.push(`/dashboard/${params.teamId}/expenses/${row.id}`);
-                        }
-                      }}
-                    >
+                  {paginatedData.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ padding: '48px', textAlign: 'center', color: 'rgba(107, 114, 128, 1)' }}>
+                        Nu exista cheltuieli. Apasa &quot;Decont Nou +&quot; pentru a adauga.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedData.map((row, index) => (
+                      <tr 
+                        key={index} 
+                        style={{
+                          height: '49px',
+                          borderBottom: '1px solid rgba(229, 231, 235, 0.3)',
+                          cursor: 'pointer',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(240, 253, 250, 0.3)')}
+                        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                        onClick={() => {
+                          if ('id' in row && row.id) {
+                            router.push(`/dashboard/${params.teamId}/expenses/${row.id}`);
+                          }
+                        }}
+                      >
                       <td style={{ textAlign: 'center' }}>
                         <div style={{
                           display: 'inline-flex',
@@ -1273,7 +1123,8 @@ export default function ExpensesPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    ))
+                  )}
                 </tbody>
               </table>
             )}
