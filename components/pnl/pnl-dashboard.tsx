@@ -29,6 +29,7 @@ import {
   BudgetWithCategory,
   Revenue,
 } from "@/app/actions/budget";
+import { getPnlData, PnlCategory } from "@/app/actions/pnl-data";
 import { exportPnlToExcel } from "@/app/actions/export";
 import { getUserPermissions } from "@/app/actions/permissions";
 
@@ -102,6 +103,9 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   const [categoryExpenses, setCategoryExpenses] = useState<CategoryExpense[]>([]);
   const [budgets, setBudgets] = useState<BudgetWithCategory[]>([]);
   const [revenues, setRevenues] = useState<Revenue[]>([]);
+  // P&L grid data (monthly by category)
+  const [pnlCategories, setPnlCategories] = useState<PnlCategory[]>([]);
+  const [cheltuieliTotal, setCheltuieliTotal] = useState<number[]>(Array(24).fill(0));
 
   // UI State
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -115,13 +119,14 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [years, permissions, summary, expenses, budgetData, revenueData] = await Promise.all([
+      const [years, permissions, summary, expenses, budgetData, revenueData, pnlData] = await Promise.all([
         getAvailableYears(teamId),
         getUserPermissions(teamId),
         getPnlSummary(teamId, selectedYear),
         getExpensesByCategory(teamId, selectedYear),
         getBudgets(teamId, selectedYear),
         getRevenues(teamId, selectedYear),
+        getPnlData(teamId, selectedYear),
       ]);
 
       setAvailableYears(years);
@@ -130,6 +135,8 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
       setCategoryExpenses(expenses);
       setBudgets(budgetData);
       setRevenues(revenueData);
+      setPnlCategories(pnlData.categories);
+      setCheltuieliTotal(pnlData.cheltuieli);
 
       // Initialize revenue inputs
       const inputs: Record<number, string> = {};
@@ -437,134 +444,167 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
         <div className="p-6">
           {/* ====== REALIZED TAB ====== */}
           {activeTab === "realized" && (
-            <div className="space-y-6">
-              {/* Monthly Summary Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50">
-                      <th className="text-left py-3 px-4 font-semibold text-gray-600">Luna</th>
-                      <th className="text-right py-3 px-4 font-semibold text-gray-600">Venituri</th>
-                      <th className="text-right py-3 px-4 font-semibold text-gray-600">Cheltuieli</th>
-                      <th className="text-right py-3 px-4 font-semibold text-gray-600">Profit</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orderedPnlSummary.map((row) => {
-                      const isCurrentMonth = isCurrentMonthCheck(row.month - 1, selectedYear);
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="text-left py-3 px-4 font-semibold text-gray-600 sticky left-0 bg-gray-50 min-w-[180px]">
+                      EUR
+                    </th>
+                    {orderedMonthIndices.map((monthIndex) => {
+                      const isCurrentMonth = isCurrentMonthCheck(monthIndex, selectedYear);
                       return (
-                        <tr
-                          key={row.month}
-                          className={`border-b border-gray-100 ${!isCurrentMonth ? "hover:bg-gray-50" : ""}`}
-                          style={isCurrentMonth ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor } : {}}
+                        <th
+                          key={monthIndex}
+                          className="text-right py-3 px-3 font-semibold min-w-[70px]"
+                          style={isCurrentMonth
+                            ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor, color: CURRENT_MONTH_STYLE.color }
+                            : { color: "#4B5563" }}
                         >
-                          <td
-                            className="py-3 px-4"
-                            style={isCurrentMonth ? { fontWeight: CURRENT_MONTH_STYLE.fontWeight, color: CURRENT_MONTH_STYLE.color } : { fontWeight: 500 }}
-                          >
-                            {MONTH_NAMES[row.month - 1]}
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            {editingRevenue === row.month ? (
-                              <div className="flex items-center justify-end gap-2">
-                                <input
-                                  type="number"
-                                  value={revenueInputs[row.month]}
-                                  onChange={(e) => handleRevenueChange(row.month, e.target.value)}
-                                  className="w-24 px-2 py-1 border rounded text-right"
-                                  autoFocus
-                                />
-                                <button
-                                  onClick={() => handleRevenueSave(row.month)}
-                                  className="p-1 text-green-600 hover:bg-green-50 rounded"
-                                >
-                                  <Check className="w-4 h-4" />
-                                </button>
-                              </div>
-                            ) : (
-                              <span
-                                onClick={() => isAdmin && setEditingRevenue(row.month)}
-                                className={`${isAdmin ? "cursor-pointer hover:text-teal-600" : ""}`}
-                              >
-                                {formatCurrency(row.revenue)}
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3 px-4 text-right text-red-600">
-                            {formatCurrency(row.expenses)}
-                          </td>
-                          <td
-                            className={`py-3 px-4 text-right font-semibold ${
-                              row.profit >= 0 ? "text-green-600" : "text-red-600"
-                            }`}
-                          >
-                            {formatCurrency(row.profit)}
-                          </td>
-                        </tr>
+                          {MONTH_NAMES[monthIndex]}
+                        </th>
                       );
                     })}
-                    {/* YTD Total */}
-                    <tr className="font-bold" style={{ backgroundColor: "#E6F4EA" }}>
-                      <td className="py-3 px-4" style={{ fontWeight: 700 }}>YTD</td>
-                      <td className="py-3 px-4 text-right">{formatCurrency(ytdRevenue)}</td>
-                      <td className="py-3 px-4 text-right text-red-600">{formatCurrency(ytdExpenses)}</td>
-                      <td
-                        className={`py-3 px-4 text-right ${
-                          ytdProfit >= 0 ? "text-green-600" : "text-red-600"
-                        }`}
+                    <th className="text-right py-3 px-4 font-semibold text-gray-600 bg-[#E6F4EA] min-w-[90px]">YTD</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {/* Cheltuieli Total Row (expandable) */}
+                  <tr
+                    className="border-b border-gray-200 cursor-pointer hover:bg-gray-50"
+                    onClick={() => toggleCategory("Cheltuieli")}
+                  >
+                    <td className="py-3 px-4 sticky left-0 bg-white font-semibold flex items-center gap-2">
+                      {expandedCategories.has("Cheltuieli") ? (
+                        <ChevronDown className="w-4 h-4 text-gray-400" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                      )}
+                      Cheltuieli
+                    </td>
+                    {orderedMonthIndices.map((monthIndex) => {
+                      const isCurrentMonth = isCurrentMonthCheck(monthIndex, selectedYear);
+                      // Use indices 12-23 for current year data
+                      const value = cheltuieliTotal[12 + monthIndex] || 0;
+                      return (
+                        <td
+                          key={monthIndex}
+                          className="py-3 px-3 text-right font-semibold"
+                          style={isCurrentMonth ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor } : {}}
+                        >
+                          {formatCurrency(value)}
+                        </td>
+                      );
+                    })}
+                    <td className="py-3 px-4 text-right font-semibold bg-[#E6F4EA]">
+                      {formatCurrency(cheltuieliTotal.slice(12, 24).reduce((a, b) => a + b, 0))}
+                    </td>
+                  </tr>
+
+                  {/* Category Rows (shown when Cheltuieli is expanded) */}
+                  {expandedCategories.has("Cheltuieli") && pnlCategories.map((category) => (
+                    <React.Fragment key={category.id}>
+                      {/* Category Row */}
+                      <tr
+                        className="border-b border-gray-100 cursor-pointer hover:bg-gray-50"
+                        onClick={() => toggleCategory(category.name)}
                       >
-                        {formatCurrency(ytdProfit)}
+                        <td className="py-2 px-4 sticky left-0 bg-white pl-8 flex items-center gap-2">
+                          {category.subcategories && category.subcategories.length > 0 && (
+                            expandedCategories.has(category.name) ? (
+                              <ChevronDown className="w-3 h-3 text-gray-400" />
+                            ) : (
+                              <ChevronRight className="w-3 h-3 text-gray-400" />
+                            )
+                          )}
+                          <span className="font-medium text-gray-700">{category.name}</span>
+                        </td>
+                        {orderedMonthIndices.map((monthIndex) => {
+                          const isCurrentMonth = isCurrentMonthCheck(monthIndex, selectedYear);
+                          // Use indices 12-23 for current year data
+                          const value = category.values[12 + monthIndex] || 0;
+                          return (
+                            <td
+                              key={monthIndex}
+                              className="py-2 px-3 text-right"
+                              style={isCurrentMonth ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor } : {}}
+                            >
+                              {value > 0 ? formatCurrency(value) : "0"}
+                            </td>
+                          );
+                        })}
+                        <td className="py-2 px-4 text-right font-medium bg-[#E6F4EA]">
+                          {formatCurrency(category.values.slice(12, 24).reduce((a, b) => a + b, 0))}
+                        </td>
+                      </tr>
+
+                      {/* Subcategory Rows */}
+                      {expandedCategories.has(category.name) && category.subcategories?.map((sub) => (
+                        <tr key={sub.id} className="border-b border-gray-50 bg-gray-50/50">
+                          <td className="py-2 px-4 sticky left-0 bg-gray-50/50 pl-14 text-gray-500 text-xs">
+                            {sub.name}
+                          </td>
+                          {orderedMonthIndices.map((monthIndex) => {
+                            const isCurrentMonth = isCurrentMonthCheck(monthIndex, selectedYear);
+                            // Use indices 12-23 for current year data
+                            const value = sub.values[12 + monthIndex] || 0;
+                            return (
+                              <td
+                                key={monthIndex}
+                                className="py-2 px-3 text-right text-gray-500 text-xs"
+                                style={isCurrentMonth ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor } : {}}
+                              >
+                                {value > 0 ? formatCurrency(value) : "0"}
+                              </td>
+                            );
+                          })}
+                          <td className="py-2 px-4 text-right text-xs text-gray-600 bg-[#E6F4EA]">
+                            {formatCurrency(sub.values.slice(12, 24).reduce((a, b) => a + b, 0))}
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  ))}
+
+                  {/* Neclasificate row for expenses without category */}
+                  {expandedCategories.has("Cheltuieli") && (
+                    <tr className="border-b border-gray-100">
+                      <td className="py-2 px-4 sticky left-0 bg-white pl-8 text-gray-500">
+                        Neclasificate
+                      </td>
+                      {orderedMonthIndices.map((monthIndex) => {
+                        const isCurrentMonth = isCurrentMonthCheck(monthIndex, selectedYear);
+                        // Calculate unclassified as total minus sum of all categories
+                        const totalForMonth = cheltuieliTotal[12 + monthIndex] || 0;
+                        const categorizedForMonth = pnlCategories.reduce(
+                          (sum, cat) => sum + (cat.values[12 + monthIndex] || 0),
+                          0
+                        );
+                        const unclassified = Math.max(0, totalForMonth - categorizedForMonth);
+                        return (
+                          <td
+                            key={monthIndex}
+                            className="py-2 px-3 text-right text-gray-500"
+                            style={isCurrentMonth ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor } : {}}
+                          >
+                            {unclassified > 0 ? formatCurrency(unclassified) : "0"}
+                          </td>
+                        );
+                      })}
+                      <td className="py-2 px-4 text-right text-gray-500 bg-[#E6F4EA]">
+                        {(() => {
+                          const totalYtd = cheltuieliTotal.slice(12, 24).reduce((a, b) => a + b, 0);
+                          const categorizedYtd = pnlCategories.reduce(
+                            (sum, cat) => sum + cat.values.slice(12, 24).reduce((a, b) => a + b, 0),
+                            0
+                          );
+                          return formatCurrency(Math.max(0, totalYtd - categorizedYtd));
+                        })()}
                       </td>
                     </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Expenses by Category */}
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Cheltuieli pe Categorii</h3>
-                <div className="space-y-2">
-                  {Array.from(categoryGroups.entries()).map(([catName, items]) => {
-                    const catTotal = items.reduce((sum, i) => sum + i.total_amount, 0);
-                    const isExpanded = expandedCategories.has(catName);
-
-                    return (
-                      <div key={catName} className="border border-gray-200 rounded-lg overflow-hidden">
-                        <button
-                          onClick={() => toggleCategory(catName)}
-                          className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100"
-                        >
-                          <div className="flex items-center gap-2">
-                            {isExpanded ? (
-                              <ChevronDown className="w-4 h-4 text-gray-400" />
-                            ) : (
-                              <ChevronRight className="w-4 h-4 text-gray-400" />
-                            )}
-                            <span className="font-medium">{catName}</span>
-                            <span className="text-gray-400 text-sm">({items.length})</span>
-                          </div>
-                          <span className="font-semibold">{formatCurrency(catTotal)} RON</span>
-                        </button>
-                        {isExpanded && (
-                          <div className="divide-y divide-gray-100">
-                            {items.map((item, idx) => (
-                              <div
-                                key={idx}
-                                className="flex justify-between px-4 py-2 pl-10 text-sm"
-                              >
-                                <span className="text-gray-600">
-                                  {item.subcategory_name || "-"}
-                                </span>
-                                <span>{formatCurrency(item.total_amount)} RON</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+                  )}
+                </tbody>
+              </table>
             </div>
           )}
 
