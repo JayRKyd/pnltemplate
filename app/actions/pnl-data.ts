@@ -371,12 +371,25 @@ export async function getCategoryExpenses(
     .eq("is_active", true);
 
   // Find matching category (could be parent or child)
-  const category = categories?.find(c => 
-    c.name.toLowerCase().includes(categoryName.toLowerCase()) ||
-    categoryName.toLowerCase().includes(c.name.toLowerCase())
-  );
+  // Category names in P&L may be prefixed with numbers like "3.2 Hardware" but DB has just "Hardware"
+  // Also handle "3. IT" matching "IT"
+  const normalizedCategoryName = categoryName.toLowerCase();
+  
+  // Extract the actual name without numbering prefix (e.g., "3.2 Hardware" -> "hardware", "3. IT" -> "it")
+  const nameWithoutPrefix = normalizedCategoryName.replace(/^\d+\.\d*\s*/, '').trim();
+  
+  const category = categories?.find(c => {
+    const dbName = c.name.toLowerCase().trim();
+    return (
+      dbName === normalizedCategoryName ||
+      dbName === nameWithoutPrefix ||
+      dbName.includes(nameWithoutPrefix) ||
+      nameWithoutPrefix.includes(dbName)
+    );
+  });
 
   if (!category) {
+    console.log(`[getCategoryExpenses] No category found for: "${categoryName}" (normalized: "${nameWithoutPrefix}")`);
     return [];
   }
 

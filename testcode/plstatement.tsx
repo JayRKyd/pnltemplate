@@ -148,7 +148,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
       '13. Asigurari': true,
       '14. Taxe si impozite': false,
     });
-    const [showInvoicesPopup, setShowInvoicesPopup] = useState<{ category: string, month: string } | null>(null);
+    const [showInvoicesPopup, setShowInvoicesPopup] = useState<{ category: string, month: string, monthIndex: number } | null>(null);
     const [popupInvoices, setPopupInvoices] = useState<any[]>([]);
     const [popupLoading, setPopupLoading] = useState(false);
 
@@ -156,9 +156,31 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
     useEffect(() => {
       if (showInvoicesPopup && getCategoryExpensesFn && teamId) {
         setPopupLoading(true);
-        const monthIndex = getMonthLabels().indexOf(showInvoicesPopup.month);
-        const month = monthIndex >= 0 ? monthIndex + 1 : 1;
-        const year = parseInt(selectedYear);
+        const monthIndex = showInvoicesPopup.monthIndex;
+        
+        // Determine the correct year based on view type and column index
+        // For P&L Realizat view: indices 0-11 are prev year, index 12 is current year
+        // For Budget view: all indices are for the selected year
+        let year: number;
+        let month: number;
+        
+        if (activeTab === 'budget') {
+          // Budget view: all months are from selected year
+          year = parseInt(selectedYear);
+          month = monthIndex + 1; // 1-12
+        } else {
+          // P&L Realizat view: rolling year (Jan prev year -> Jan current year)
+          const prevYear = parseInt(selectedYear) - 1;
+          if (monthIndex < 12) {
+            // Indices 0-11 are months from previous year
+            year = prevYear;
+            month = monthIndex + 1; // 1-12
+          } else {
+            // Index 12 is January of current year
+            year = parseInt(selectedYear);
+            month = 1; // January
+          }
+        }
         
         getCategoryExpensesFn(teamId, showInvoicesPopup.category, year, month)
           .then(data => {
@@ -991,7 +1013,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                               style={getColumnStyle(index)}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (amount > 0) setShowInvoicesPopup({ category: category.name, month: getMonthLabels()[index] });
+                                if (amount > 0) setShowInvoicesPopup({ category: category.name, month: getMonthLabels()[index], monthIndex: index });
                               }}
                             >
                               {amount > 0 ? formatAmount(amount) : 0}
@@ -1012,13 +1034,12 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                         {expandedCategories.includes(category.name) && category.subcategories?.map((subcat, subIndex) => (
                           <div 
                             key={`${catIndex}-${subIndex}`}
-                            className="group transition-colors hover:bg-gray-50 cursor-pointer"
+                            className="group transition-colors hover:bg-gray-50"
                             style={{ 
                               ...getGridLayout(),
                               borderBottom: '1px solid #F3F4F6',
                               backgroundColor: '#F9FAFB'
                             }}
-                            onClick={() => setShowInvoicesPopup({ category: subcat.name, month: 'AUG' })}
                           >
                             <div className="px-6 py-2 text-xs text-gray-500 pl-16 hover:text-[#0EA5E9]">
                               {subcat.name}
@@ -1031,7 +1052,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                                 style={getColumnStyle(index)}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (amount > 0) setShowInvoicesPopup({ category: subcat.name, month: getMonthLabels()[index] });
+                                  if (amount > 0) setShowInvoicesPopup({ category: subcat.name, month: getMonthLabels()[index], monthIndex: index });
                                 }}
                               >
                                 {amount > 0 ? formatAmount(amount) : 0}
@@ -1114,7 +1135,11 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                             Facturi – {showInvoicesPopup.category}
                           </h2>
                           <p className="text-sm text-gray-500">
-                            {showInvoicesPopup.month.charAt(0) + showInvoicesPopup.month.slice(1).toLowerCase()} {selectedYear}
+                            {showInvoicesPopup.month.charAt(0) + showInvoicesPopup.month.slice(1).toLowerCase()} {
+                              activeTab === 'budget' 
+                                ? selectedYear 
+                                : (showInvoicesPopup.monthIndex < 12 ? parseInt(selectedYear) - 1 : selectedYear)
+                            }
                           </p>
                         </div>
                         <button
