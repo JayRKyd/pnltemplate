@@ -74,6 +74,7 @@ export async function getPnlData(
     .select(`
       id,
       expense_date,
+      accounting_period,
       supplier,
       description,
       doc_number,
@@ -88,9 +89,9 @@ export async function getPnlData(
     `)
     .eq("team_id", teamId)
     .is("deleted_at", null)
-    .gte("expense_date", `${prevYear}-01-01`)
-    .lte("expense_date", `${baseYear}-12-31`)
-    .in("status", ["approved", "paid", "pending", "draft"]);
+    .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
+    .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`)
+    .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]);
 
   // Get revenues for both years
   const { data: revenuesData } = await supabase
@@ -109,7 +110,20 @@ export async function getPnlData(
     .lte("year", baseYear);
 
   // Helper to get month index (0-23) from date
-  const getMonthIndex = (dateStr: string): number => {
+  // Uses accounting_period (Luna P&L) if available, otherwise falls back to expense_date
+  const getMonthIndex = (dateStr: string, accountingPeriodStr: string | null): number => {
+    // Use accounting_period if available (format: "YYYY-MM")
+    if (accountingPeriodStr) {
+      const parts = accountingPeriodStr.split('-');
+      if (parts.length === 2) {
+        const year = parseInt(parts[0]);
+        const month = parseInt(parts[1]) - 1; // 0-11
+        if (year === prevYear) return month;
+        if (year === baseYear) return month + 12;
+      }
+    }
+    
+    // Fallback to expense_date
     const date = new Date(dateStr);
     const year = date.getFullYear();
     const month = date.getMonth(); // 0-11
@@ -122,6 +136,7 @@ export async function getPnlData(
   interface ExpenseRecord {
     id: string;
     expense_date: string;
+    accounting_period: string | null;
     supplier: string | null;
     description: string | null;
     doc_number: string | null;
@@ -146,7 +161,7 @@ export async function getPnlData(
   // Calculate total expenses per month
   const cheltuieli = emptyMonths();
   expensesData?.forEach(expense => {
-    const idx = getMonthIndex(expense.expense_date);
+    const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
     if (idx >= 0 && idx < 24) {
       cheltuieli[idx] += getExpenseAmount(expense);
     }
@@ -164,7 +179,7 @@ export async function getPnlData(
       expensesData?.forEach(expense => {
         if (expense.subcategory_id === sub.id || 
             (expense.category_id === parent.id && expense.subcategory_id === sub.id)) {
-          const idx = getMonthIndex(expense.expense_date);
+          const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
           if (idx >= 0 && idx < 24) {
             const amount = getExpenseAmount(expense);
             subValues[idx] += amount;
@@ -177,7 +192,7 @@ export async function getPnlData(
       if (subcats.length === 0) {
         expensesData?.forEach(expense => {
           if (expense.category_id === parent.id && !expense.subcategory_id) {
-            const idx = getMonthIndex(expense.expense_date);
+            const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
             if (idx >= 0 && idx < 24) {
               const amount = getExpenseAmount(expense);
               catValues[idx] += amount;
@@ -197,7 +212,7 @@ export async function getPnlData(
     if (subcats.length === 0) {
       expensesData?.forEach(expense => {
         if (expense.category_id === parent.id) {
-          const idx = getMonthIndex(expense.expense_date);
+          const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
           if (idx >= 0 && idx < 24) {
             catValues[idx] += getExpenseAmount(expense);
           }
@@ -218,7 +233,7 @@ export async function getPnlData(
   const uncategorizedValues = emptyMonths();
   expensesData?.forEach(expense => {
     if (!expense.category_id) {
-      const idx = getMonthIndex(expense.expense_date);
+      const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
       if (idx >= 0 && idx < 24) {
         uncategorizedValues[idx] += getExpenseAmount(expense);
       }

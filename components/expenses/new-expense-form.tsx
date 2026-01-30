@@ -764,7 +764,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         categoryId: lines[0].categoryId || undefined,
         subcategoryId: lines[0].subcategoryId || undefined,
         accountingPeriod: convertToAccountingPeriod(lines[0].lunaP) || undefined,
-        status: isDraft ? "draft" : "draft",
+        status: isDraft ? "draft" : "recurent",
       };
 
       let savedExpenseId: string;
