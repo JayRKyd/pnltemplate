@@ -78,6 +78,26 @@ function parseAmount(value: string): number {
   return parseFloat(cleaned) || 0;
 }
 
+// Format tags input: ensure each tag starts with # and has no spaces
+function formatTagsInput(value: string): string {
+  if (!value.trim()) return "";
+
+  // Split by comma to get individual tags
+  const tags = value.split(",");
+
+  return tags.map((tag, index) => {
+    // Remove all spaces within the tag
+    const cleanTag = tag.replace(/\s+/g, "").toLowerCase();
+    if (!cleanTag) return "";
+    // Remove # if present, then add it back (handles ##tag case)
+    const withoutHash = cleanTag.replace(/^#+/, "");
+    if (!withoutHash) return "#";
+    // Add comma separator for tags after the first
+    const prefix = index > 0 ? ", " : "";
+    return `${prefix}#${withoutHash}`;
+  }).filter(t => t).join("");
+}
+
 // Smart VAT auto-calculation
 function calculateVATFromTwoFields(
   field1: "sumaCuTVA" | "sumaFaraTVA" | "tva",
@@ -558,10 +578,14 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
           line.cotaTVA = "";
           line.tva = ""; // Clear TVA when not enough fields are filled
         }
+      } else if (field === "tags") {
+        // Auto-format tags: ensure each tag starts with #
+        const formattedTags = formatTagsInput(value);
+        (line as Record<string, unknown>)[field] = formattedTags;
       } else {
         (line as Record<string, unknown>)[field] = value;
       }
-      
+
       newLines[index] = line;
       return newLines;
     });
@@ -635,8 +659,9 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   // Check for missing required fields
   const checkMissingFields = useCallback(() => {
     const missing: string[] = [];
-    
-    if (!furnizor.trim()) missing.push("Furnizor");
+
+    // Furnizor must be selected from the list (locked), not just typed
+    if (!furnizorLocked || !furnizor.trim()) missing.push("Furnizor (selecteaza din lista)");
     if (!docType) missing.push("Tip Document");
     if (uploadedFiles.length === 0) missing.push("Document");
     
@@ -694,10 +719,11 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   // Helper to check header field validation errors
   const hasHeaderFieldError = useCallback((field: string) => {
     if (!showValidationErrors) return false;
-    
+
     switch (field) {
       case 'furnizor':
-        return !furnizor.trim();
+        // Must be selected from list (locked), not just typed
+        return !furnizorLocked || !furnizor.trim();
       case 'docType':
         return !docType;
       case 'document':
@@ -705,7 +731,21 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
       default:
         return false;
     }
-  }, [showValidationErrors, furnizor, docType, uploadedFiles.length]);
+  }, [showValidationErrors, furnizor, furnizorLocked, docType, uploadedFiles.length]);
+
+  // Clear supplier field if user didn't select from list
+  const handleSupplierBlur = useCallback(() => {
+    // Small delay to allow click on dropdown item to register first
+    setTimeout(() => {
+      if (!furnizorLocked && furnizor.trim()) {
+        // User typed something but didn't select - clear it
+        setFurnizor("");
+        setFurnizorCui("");
+        setShowSupplierDropdown(false);
+        setSupplierSearchResults([]);
+      }
+    }, 200);
+  }, [furnizorLocked, furnizor]);
 
   // Track if save is in progress to prevent double-clicks
   const [saveInProgress, setSaveInProgress] = useState(false);
@@ -1023,20 +1063,21 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
             {/* Supplier Search */}
             <div style={{ position: 'relative' }} data-supplier-dropdown>
               <img src="https://storage.googleapis.com/storage.magicpath.ai/user/365266140869578752/figma-assets/199be80d-8f1c-421a-8a15-baed1b4f7d0a.svg" alt="Search" style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', zIndex: 1 }} />
-              <TextInput 
-                placeholder="Furnizor (nume sau CUI)"
+              <TextInput
+                placeholder="Cauta si selecteaza furnizor"
                 value={furnizorLocked ? `${furnizor}${furnizorCui ? ` / ${furnizorCui}` : ""}` : furnizor}
                 onChange={(e) => handleSupplierSearch(e.target.value)}
                 onFocus={() => furnizor.length >= 2 && !furnizorLocked && setShowSupplierDropdown(true)}
+                onBlur={handleSupplierBlur}
                 disabled={furnizorLocked}
                 className={hasHeaderFieldError('furnizor') ? 'error-placeholder' : 'normal-placeholder'}
-                style={{ 
-                  width: '220px', 
-                  height: '40px', 
+                style={{
+                  width: '220px',
+                  height: '40px',
                   paddingLeft: '36px',
                   backgroundColor: hasHeaderFieldError('furnizor') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
                   borderColor: hasHeaderFieldError('furnizor') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'
-                }} 
+                }}
               />
               {searchingSupplier && <Loader2 size={14} className="animate-spin" style={{ position: 'absolute', right: '12px', top: '13px', color: 'rgba(156, 163, 175, 1)' }} />}
               {furnizorLocked && (

@@ -33,8 +33,8 @@ import { exportPnlToExcel } from "@/app/actions/export";
 import { getUserPermissions } from "@/app/actions/permissions";
 
 const MONTH_NAMES = [
-  "Ian", "Feb", "Mar", "Apr", "Mai", "Iun",
-  "Iul", "Aug", "Sep", "Oct", "Noi", "Dec"
+  "IAN", "FEB", "MAR", "APR", "MAI", "IUN",
+  "IUL", "AUG", "SEP", "OCT", "NOI", "DEC"
 ];
 
 const MONTH_FULL_NAMES = [
@@ -42,9 +42,52 @@ const MONTH_FULL_NAMES = [
   "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie"
 ];
 
+// Current month highlight style
+const CURRENT_MONTH_STYLE = {
+  backgroundColor: "#FFF1E6",
+  fontWeight: 700,
+  color: "#1F2937",
+};
+
 interface PnlDashboardProps {
   teamId: string;
 }
+
+// Helper to get current month (0-indexed) and year
+const getCurrentMonthInfo = () => {
+  const now = new Date();
+  return {
+    month: now.getMonth(), // 0-11
+    year: now.getFullYear(),
+  };
+};
+
+// Reorder months for rolling 12-month view (current month at end)
+// For current year: shows rolling 12 months with current month at the end
+// For past years: shows Jan-Dec in normal order
+const getOrderedMonths = (selectedYear: number): number[] => {
+  const { month: currentMonth, year: currentYear } = getCurrentMonthInfo();
+
+  if (selectedYear === currentYear) {
+    // Rolling 12 months: current month at end
+    // E.g., if current month is March (2), order is: Apr(3), May(4)...Dec(11), Jan(0), Feb(1), Mar(2)
+    const ordered: number[] = [];
+    for (let i = 1; i <= 12; i++) {
+      const monthIndex = (currentMonth + i) % 12;
+      ordered.push(monthIndex);
+    }
+    return ordered;
+  }
+
+  // Past years: Jan-Dec in normal order (0-11)
+  return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+};
+
+// Check if a month index is the current month (for highlighting)
+const isCurrentMonthCheck = (monthIndex: number, selectedYear: number): boolean => {
+  const { month: currentMonth, year: currentYear } = getCurrentMonthInfo();
+  return selectedYear === currentYear && monthIndex === currentMonth;
+};
 
 export function PnlDashboard({ teamId }: PnlDashboardProps) {
   const [activeTab, setActiveTab] = useState<"realized" | "budget" | "delta">("realized");
@@ -233,6 +276,14 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
     categoryGroups.get(catName)!.push(exp);
   });
 
+  // Get ordered months for current view
+  const orderedMonthIndices = getOrderedMonths(selectedYear);
+
+  // Reorder pnlSummary based on rolling 12-month logic
+  const orderedPnlSummary = orderedMonthIndices
+    .map((monthIndex) => pnlSummary.find((row) => row.month === monthIndex + 1))
+    .filter((row): row is PnlSummary => row !== undefined);
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("ro-RO", {
       style: "decimal",
@@ -399,50 +450,62 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {pnlSummary.map((row) => (
-                      <tr key={row.month} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-4 font-medium">{MONTH_FULL_NAMES[row.month - 1]}</td>
-                        <td className="py-3 px-4 text-right">
-                          {editingRevenue === row.month ? (
-                            <div className="flex items-center justify-end gap-2">
-                              <input
-                                type="number"
-                                value={revenueInputs[row.month]}
-                                onChange={(e) => handleRevenueChange(row.month, e.target.value)}
-                                className="w-24 px-2 py-1 border rounded text-right"
-                                autoFocus
-                              />
-                              <button
-                                onClick={() => handleRevenueSave(row.month)}
-                                className="p-1 text-green-600 hover:bg-green-50 rounded"
-                              >
-                                <Check className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ) : (
-                            <span
-                              onClick={() => isAdmin && setEditingRevenue(row.month)}
-                              className={`${isAdmin ? "cursor-pointer hover:text-teal-600" : ""}`}
-                            >
-                              {formatCurrency(row.revenue)}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-right text-red-600">
-                          {formatCurrency(row.expenses)}
-                        </td>
-                        <td
-                          className={`py-3 px-4 text-right font-semibold ${
-                            row.profit >= 0 ? "text-green-600" : "text-red-600"
-                          }`}
+                    {orderedPnlSummary.map((row) => {
+                      const isCurrentMonth = isCurrentMonthCheck(row.month - 1, selectedYear);
+                      return (
+                        <tr
+                          key={row.month}
+                          className={`border-b border-gray-100 ${!isCurrentMonth ? "hover:bg-gray-50" : ""}`}
+                          style={isCurrentMonth ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor } : {}}
                         >
-                          {formatCurrency(row.profit)}
-                        </td>
-                      </tr>
-                    ))}
+                          <td
+                            className="py-3 px-4"
+                            style={isCurrentMonth ? { fontWeight: CURRENT_MONTH_STYLE.fontWeight, color: CURRENT_MONTH_STYLE.color } : { fontWeight: 500 }}
+                          >
+                            {MONTH_NAMES[row.month - 1]}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            {editingRevenue === row.month ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <input
+                                  type="number"
+                                  value={revenueInputs[row.month]}
+                                  onChange={(e) => handleRevenueChange(row.month, e.target.value)}
+                                  className="w-24 px-2 py-1 border rounded text-right"
+                                  autoFocus
+                                />
+                                <button
+                                  onClick={() => handleRevenueSave(row.month)}
+                                  className="p-1 text-green-600 hover:bg-green-50 rounded"
+                                >
+                                  <Check className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span
+                                onClick={() => isAdmin && setEditingRevenue(row.month)}
+                                className={`${isAdmin ? "cursor-pointer hover:text-teal-600" : ""}`}
+                              >
+                                {formatCurrency(row.revenue)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right text-red-600">
+                            {formatCurrency(row.expenses)}
+                          </td>
+                          <td
+                            className={`py-3 px-4 text-right font-semibold ${
+                              row.profit >= 0 ? "text-green-600" : "text-red-600"
+                            }`}
+                          >
+                            {formatCurrency(row.profit)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {/* YTD Total */}
-                    <tr className="bg-gray-100 font-bold">
-                      <td className="py-3 px-4">YTD Total</td>
+                    <tr className="font-bold" style={{ backgroundColor: "#E6F4EA" }}>
+                      <td className="py-3 px-4" style={{ fontWeight: 700 }}>YTD</td>
                       <td className="py-3 px-4 text-right">{formatCurrency(ytdRevenue)}</td>
                       <td className="py-3 px-4 text-right text-red-600">{formatCurrency(ytdExpenses)}</td>
                       <td
@@ -566,53 +629,72 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
                         <th className="text-left py-3 px-4 font-semibold text-gray-600 sticky left-0 bg-gray-50">
                           Categorie
                         </th>
-                        {MONTH_NAMES.map((m) => (
-                          <th key={m} className="text-right py-3 px-3 font-semibold text-gray-600">
-                            {m}
-                          </th>
-                        ))}
-                        <th className="text-right py-3 px-4 font-semibold text-gray-600">Total</th>
+                        {orderedMonthIndices.map((monthIndex) => {
+                          const isCurrentMonth = isCurrentMonthCheck(monthIndex, selectedYear);
+                          return (
+                            <th
+                              key={monthIndex}
+                              className="text-right py-3 px-3 font-semibold"
+                              style={isCurrentMonth
+                                ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor, color: CURRENT_MONTH_STYLE.color }
+                                : { color: "#4B5563" }}
+                            >
+                              {MONTH_NAMES[monthIndex]}
+                            </th>
+                          );
+                        })}
+                        <th className="text-right py-3 px-4 font-semibold text-gray-600 bg-[#E6F4EA]">YTD</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {budgets.map((b) => (
-                        <tr key={b.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4 sticky left-0 bg-white">
-                            <span className="font-medium">{b.category_name}</span>
-                            {b.subcategory_name && (
-                              <span className="text-gray-400 ml-2">/ {b.subcategory_name}</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.jan)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.feb)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.mar)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.apr)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.may)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.jun)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.jul)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.aug)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.sep)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.oct)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.nov)}</td>
-                          <td className="py-3 px-3 text-right">{formatCurrency(b.dec)}</td>
-                          <td className="py-3 px-4 text-right font-semibold">
-                            {formatCurrency(b.annual_total)}
-                          </td>
-                        </tr>
-                      ))}
+                      {budgets.map((b) => {
+                        const monthKeys = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"] as const;
+                        return (
+                          <tr key={b.id} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-3 px-4 sticky left-0 bg-white">
+                              <span className="font-medium">{b.category_name}</span>
+                              {b.subcategory_name && (
+                                <span className="text-gray-400 ml-2">/ {b.subcategory_name}</span>
+                              )}
+                            </td>
+                            {orderedMonthIndices.map((monthIndex) => {
+                              const monthKey = monthKeys[monthIndex];
+                              const isCurrentMonth = isCurrentMonthCheck(monthIndex, selectedYear);
+                              return (
+                                <td
+                                  key={monthIndex}
+                                  className="py-3 px-3 text-right"
+                                  style={isCurrentMonth ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor } : {}}
+                                >
+                                  {formatCurrency(Number(b[monthKey]) || 0)}
+                                </td>
+                              );
+                            })}
+                            <td className="py-3 px-4 text-right font-semibold bg-[#E6F4EA]">
+                              {formatCurrency(b.annual_total)}
+                            </td>
+                          </tr>
+                        );
+                      })}
                       {/* Total row */}
                       <tr className="bg-gray-100 font-bold">
                         <td className="py-3 px-4 sticky left-0 bg-gray-100">TOTAL</td>
-                        {MONTH_NAMES.map((_, idx) => {
-                          const monthKey = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"][idx] as keyof BudgetWithCategory;
+                        {orderedMonthIndices.map((monthIndex) => {
+                          const monthKeys = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"] as const;
+                          const monthKey = monthKeys[monthIndex];
                           const total = budgets.reduce((sum, b) => sum + (Number(b[monthKey]) || 0), 0);
+                          const isCurrentMonth = isCurrentMonthCheck(monthIndex, selectedYear);
                           return (
-                            <td key={idx} className="py-3 px-3 text-right">
+                            <td
+                              key={monthIndex}
+                              className="py-3 px-3 text-right"
+                              style={isCurrentMonth ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor } : {}}
+                            >
                               {formatCurrency(total)}
                             </td>
                           );
                         })}
-                        <td className="py-3 px-4 text-right">{formatCurrency(ytdBudget)}</td>
+                        <td className="py-3 px-4 text-right bg-[#E6F4EA]">{formatCurrency(ytdBudget)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -636,14 +718,24 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {pnlSummary.map((row) => {
-                      const deltaPercent = row.budget > 0 
-                        ? ((row.budget - row.expenses) / row.budget * 100) 
+                    {orderedPnlSummary.map((row) => {
+                      const deltaPercent = row.budget > 0
+                        ? ((row.budget - row.expenses) / row.budget * 100)
                         : 0;
-                      
+                      const isCurrentMonth = isCurrentMonthCheck(row.month - 1, selectedYear);
+
                       return (
-                        <tr key={row.month} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4 font-medium">{MONTH_FULL_NAMES[row.month - 1]}</td>
+                        <tr
+                          key={row.month}
+                          className={`border-b border-gray-100 ${!isCurrentMonth ? "hover:bg-gray-50" : ""}`}
+                          style={isCurrentMonth ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor } : {}}
+                        >
+                          <td
+                            className="py-3 px-4"
+                            style={isCurrentMonth ? { fontWeight: CURRENT_MONTH_STYLE.fontWeight, color: CURRENT_MONTH_STYLE.color } : { fontWeight: 500 }}
+                          >
+                            {MONTH_NAMES[row.month - 1]}
+                          </td>
                           <td className="py-3 px-4 text-right">{formatCurrency(row.budget)}</td>
                           <td className="py-3 px-4 text-right">{formatCurrency(row.expenses)}</td>
                           <td
@@ -664,8 +756,8 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
                       );
                     })}
                     {/* YTD Total */}
-                    <tr className="bg-gray-100 font-bold">
-                      <td className="py-3 px-4">YTD Total</td>
+                    <tr className="font-bold" style={{ backgroundColor: "#E6F4EA" }}>
+                      <td className="py-3 px-4" style={{ fontWeight: 700 }}>YTD</td>
                       <td className="py-3 px-4 text-right">{formatCurrency(ytdBudget)}</td>
                       <td className="py-3 px-4 text-right">{formatCurrency(ytdExpenses)}</td>
                       <td
@@ -680,7 +772,7 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
                           ytdBudget > 0 && ytdDelta >= 0 ? "text-green-600" : "text-red-600"
                         }`}
                       >
-                        {ytdBudget > 0 
+                        {ytdBudget > 0
                           ? `${ytdDelta >= 0 ? "+" : ""}${((ytdDelta / ytdBudget) * 100).toFixed(1)}%`
                           : "N/A"
                         }
