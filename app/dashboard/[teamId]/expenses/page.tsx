@@ -654,35 +654,20 @@ export default function ExpensesPage() {
           onClose={() => setPaymentModalData(null)}
           onConfirm={async () => {
             if (!paymentModalData) return;
-            
+
             try {
               const newPaymentStatus = paymentModalData.currentlyPaid ? 'unpaid' : 'paid';
-              
-              // For recurring expenses: when marking as paid, also change status to approved (Final)
-              // When marking as unpaid, change status back to placeholder (Recurent)
-              if (paymentModalData.isRecurring) {
-                const newStatus = newPaymentStatus === 'paid' ? 'approved' : 'placeholder';
-                await updateExpense(
-                  paymentModalData.expenseId,
-                  params.teamId,
-                  { 
-                    paymentStatus: newPaymentStatus as 'paid' | 'unpaid',
-                    status: newStatus
-                  }
-                );
-              } else {
-                // For regular expenses: when marking as paid, also change status to approved (Final)
-                // When marking as unpaid, change status back to recurent
-                const newStatus = newPaymentStatus === 'paid' ? 'approved' : 'recurent';
-                await updateExpense(
-                  paymentModalData.expenseId,
-                  params.teamId,
-                  { 
-                    paymentStatus: newPaymentStatus as 'paid' | 'unpaid',
-                    status: newStatus
-                  }
-                );
-              }
+
+              // Plata toggle ONLY changes payment_status, never the expense status
+              // Status (Draft/Final/Recurent) is independent from payment status
+              await updateExpense(
+                paymentModalData.expenseId,
+                params.teamId,
+                {
+                  paymentStatus: newPaymentStatus as 'paid' | 'unpaid'
+                }
+              );
+
               // Reload expenses to reflect the change
               await loadExpenses();
             } catch (err) {

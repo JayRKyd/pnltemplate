@@ -423,7 +423,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
       clearTimeout(supplierSearchTimeout.current);
     }
 
-    if (query.length < 3) {
+    if (query.length < 2) {
       setShowSupplierDropdown(false);
       setSupplierSearchResults([]);
       return;
@@ -764,7 +764,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         categoryId: lines[0].categoryId || undefined,
         subcategoryId: lines[0].subcategoryId || undefined,
         accountingPeriod: convertToAccountingPeriod(lines[0].lunaP) || undefined,
-        status: isDraft ? "draft" : "recurent",
+        status: isDraft ? "draft" : "final",
       };
 
       let savedExpenseId: string;
@@ -1027,7 +1027,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                 placeholder="Furnizor (nume sau CUI)"
                 value={furnizorLocked ? `${furnizor}${furnizorCui ? ` / ${furnizorCui}` : ""}` : furnizor}
                 onChange={(e) => handleSupplierSearch(e.target.value)}
-                onFocus={() => furnizor.length >= 3 && !furnizorLocked && setShowSupplierDropdown(true)}
+                onFocus={() => furnizor.length >= 2 && !furnizorLocked && setShowSupplierDropdown(true)}
                 disabled={furnizorLocked}
                 className={hasHeaderFieldError('furnizor') ? 'error-placeholder' : 'normal-placeholder'}
                 style={{ 

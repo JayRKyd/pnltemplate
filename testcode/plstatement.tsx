@@ -158,29 +158,9 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         setPopupLoading(true);
         const monthIndex = showInvoicesPopup.monthIndex;
         
-        // Determine the correct year based on view type and column index
-        // For P&L Realizat view: indices 0-11 are prev year, index 12 is current year
-        // For Budget view: all indices are for the selected year
-        let year: number;
-        let month: number;
-        
-        if (activeTab === 'budget') {
-          // Budget view: all months are from selected year
-          year = parseInt(selectedYear);
-          month = monthIndex + 1; // 1-12
-        } else {
-          // P&L Realizat view: rolling year (Jan prev year -> Jan current year)
-          const prevYear = parseInt(selectedYear) - 1;
-          if (monthIndex < 12) {
-            // Indices 0-11 are months from previous year
-            year = prevYear;
-            month = monthIndex + 1; // 1-12
-          } else {
-            // Index 12 is January of current year
-            year = parseInt(selectedYear);
-            month = 1; // January
-          }
-        }
+        // All months are now from the selected calendar year
+        const year = parseInt(selectedYear);
+        const month = monthIndex + 1; // 1-12 (Jan=1, Dec=12)
         
         getCategoryExpensesFn(teamId, showInvoicesPopup.category, year, month)
           .then(data => {
@@ -521,35 +501,29 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
     };
 
     // Get the data for the current view
+    // Data from getPnlData(X) has structure: [X-1 Jan-Dec (0-11), X Jan-Dec (12-23)]
+    // When viewing year X, we want indices 12-23 to show the CURRENT YEAR (X)
     const getYearData = (values: number[]) => {
-      if (activeTab === 'budget') {
-        // Budget view: Calendar year (Jan-Dec of selected year)
-        // For 2026: Jan 2026 (index 12) -> Dec 2026 (index 23)
-        // For 2025: Jan 2025 (index 0) -> Dec 2025 (index 11) when viewing 2025-2026 data
-        const yearOffset = selectedYear === '2026' ? 12 : 0;
-        return values.slice(yearOffset, yearOffset + 12);
-      }
-      // P&L Realizat view: Rolling year (Jan-Jan)
-      // Always return Jan previous year -> Jan current year (13 months)
-      // For 2026: Jan 2025 (index 0) -> Jan 2026 (index 12)
-      return values.slice(0, 13);
+      // Both P&L Realizat and Budget view now show calendar year of selected year
+      // Data indices 12-23 = Jan-Dec of the selected year
+      return values.slice(12, 24);
     };
 
-    // Get month labels based on active tab
+    // Get month labels - always calendar year (Jan-Dec)
     const getMonthLabels = () => {
-      if (activeTab === 'budget') {
-        // Budget view: Calendar year (Jan-Dec)
-        return ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-      }
-      // P&L Realizat view: Rolling year (Jan-Jan)
-      return ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC', 'IAN'];
+      return ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
     };
 
-    // Determine if an index is the current month (only for P&L Realizat view)
+    // Determine if an index is the current month (highlight current month)
     const isCurrentMonth = (index: number) => {
       if (activeTab === 'budget') return false; // No current month highlight in budget view
-      // In Jan-Jan view, Jan 2026 is index 12 (last column)
-      return index === 12; // Jan 2026 is the current month
+      // Get current month (0-based)
+      const now = new Date();
+      const currentMonth = now.getMonth(); // 0 = Jan, 11 = Dec
+      const currentYearNum = now.getFullYear();
+      // Only highlight if viewing current year
+      if (parseInt(selectedYear) !== currentYearNum) return false;
+      return index === currentMonth;
     };
 
     // Get column styles for highlights
@@ -565,9 +539,13 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
       }
       
       const isCurrent = isCurrentMonth(index);
+      const now = new Date();
+      const currentYearNum = now.getFullYear();
+      const currentMonthNum = now.getMonth();
+      const viewingYear = parseInt(selectedYear);
       
       if (isCurrent) {
-        // Current month (Jan 2026) highlighted (Orange/Beige)
+        // Current month highlighted (Orange/Beige)
         return {
           backgroundColor: isHeader ? '#FFF1E6' : '#FFF1E6',
           fontWeight: 700,
@@ -575,18 +553,30 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         };
       }
       
-      // Header-specific styling for previous year months (Jan-Dec 2025)
-      if (isHeader && index < 12) {
-        return {
-          color: '#9CA3AF', // Gray for past year
-          fontWeight: 600
-        };
+      // Gray out past months when viewing current year
+      if (viewingYear === currentYearNum && index < currentMonthNum) {
+        if (isHeader) {
+          return {
+            color: '#9CA3AF', // Gray for past months
+            fontWeight: 600
+          };
+        }
+      }
+      
+      // Gray out all months when viewing past year
+      if (viewingYear < currentYearNum) {
+        if (isHeader) {
+          return {
+            color: '#9CA3AF', // Gray for past year
+            fontWeight: 600
+          };
+        }
       }
       
       return {};
     };
 
-    // Grid layout definition - different for budget vs P&L Realizat
+    // Grid layout definition - both views now use 12 months (calendar year)
     const getGridLayout = () => {
       if (activeTab === 'budget') {
         // Budget: 12 months + YTD + TOTAL
@@ -597,10 +587,10 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
           alignItems: 'center'
         };
       }
-      // P&L Realizat: 13 months (Jan-Jan) + YTD
+      // P&L Realizat: 12 months (Jan-Dec) + YTD
       return {
         display: 'grid',
-        gridTemplateColumns: '220px repeat(13, minmax(60px, 1fr)) 100px',
+        gridTemplateColumns: '220px repeat(12, minmax(60px, 1fr)) 100px',
         gap: '0',
         alignItems: 'center'
       };
@@ -1135,11 +1125,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                             Facturi – {showInvoicesPopup.category}
                           </h2>
                           <p className="text-sm text-gray-500">
-                            {showInvoicesPopup.month.charAt(0) + showInvoicesPopup.month.slice(1).toLowerCase()} {
-                              activeTab === 'budget' 
-                                ? selectedYear 
-                                : (showInvoicesPopup.monthIndex < 12 ? parseInt(selectedYear) - 1 : selectedYear)
-                            }
+                            {showInvoicesPopup.month.charAt(0) + showInvoicesPopup.month.slice(1).toLowerCase()} {selectedYear}
                           </p>
                         </div>
                         <button

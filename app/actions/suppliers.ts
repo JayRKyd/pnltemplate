@@ -1,6 +1,7 @@
 "use server";
 
 import { supabase } from "@/lib/supabase";
+import { searchPredefinedSuppliers } from "@/lib/data/suppliers";
 
 // Romanian company data from ANAF API (openapi.ro as proxy)
 interface ANAFCompanyResult {
@@ -20,42 +21,63 @@ export interface SupplierSearchResult {
   county?: string;
   city?: string;
   status?: string;
+  source?: "predefined" | "local" | "anaf"; // Source of the supplier data
 }
 
 // Search suppliers by CUI or company name
-// Uses openapi.ro which proxies ANAF data for Romanian companies
+// Priority: 1. Predefined suppliers (from Excel), 2. Local DB, 3. ANAF API
 export async function searchSuppliers(
   query: string,
   teamId: string
 ): Promise<SupplierSearchResult[]> {
-  if (!query || query.length < 3) {
+  if (!query || query.length < 2) {
     return [];
   }
 
   const results: SupplierSearchResult[] = [];
+  const seen = new Set<string>();
 
-  // First, search in our local database for previously used suppliers
-  const { data: localSuppliers } = await supabase
-    .from("team_expenses")
-    .select("supplier, supplier_cui")
-    .eq("team_id", teamId)
-    .or(`supplier.ilike.%${query}%,supplier_cui.ilike.%${query}%`)
-    .limit(5);
+  // First, search predefined suppliers from Excel file (Furnizori P&L.xlsx)
+  const predefinedResults = searchPredefinedSuppliers(query);
+  for (const supplier of predefinedResults.slice(0, 10)) {
+    const key = supplier.cui || supplier.name.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      results.push({
+        cui: supplier.cui || "",
+        name: supplier.name,
+        displayName: supplier.cui
+          ? `${supplier.name} / ${supplier.cui}`
+          : supplier.name,
+        source: "predefined",
+      });
+    }
+  }
 
-  // Add local results first (previously used suppliers)
-  if (localSuppliers) {
-    const seen = new Set<string>();
-    for (const s of localSuppliers) {
-      const key = s.supplier_cui || s.supplier;
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        results.push({
-          cui: s.supplier_cui || "",
-          name: s.supplier || "",
-          displayName: s.supplier_cui 
-            ? `${s.supplier} / ${s.supplier_cui}` 
-            : s.supplier || "",
-        });
+  // Then search in our local database for previously used suppliers
+  if (query.length >= 3) {
+    const { data: localSuppliers } = await supabase
+      .from("team_expenses")
+      .select("supplier, supplier_cui")
+      .eq("team_id", teamId)
+      .or(`supplier.ilike.%${query}%,supplier_cui.ilike.%${query}%`)
+      .limit(5);
+
+    // Add local results (previously used suppliers not in predefined)
+    if (localSuppliers) {
+      for (const s of localSuppliers) {
+        const key = s.supplier_cui || s.supplier?.toLowerCase();
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          results.push({
+            cui: s.supplier_cui || "",
+            name: s.supplier || "",
+            displayName: s.supplier_cui
+              ? `${s.supplier} / ${s.supplier_cui}`
+              : s.supplier || "",
+            source: "local",
+          });
+        }
       }
     }
   }
@@ -89,8 +111,9 @@ export async function searchSuppliers(
             county: data.judet,
             city: data.localitate,
             status: data.stare_inregistrare,
+            source: "anaf",
           };
-          
+
           // Add if not already in results
           if (!results.find(r => r.cui === company.cui)) {
             results.push(company);
@@ -120,8 +143,9 @@ export async function searchSuppliers(
               address: item.adresa,
               county: item.judet,
               city: item.localitate,
+              source: "anaf",
             };
-            
+
             if (company.cui && !results.find(r => r.cui === company.cui)) {
               results.push(company);
             }
