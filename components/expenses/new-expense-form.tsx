@@ -835,10 +835,8 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         console.warn("Some attachments failed to upload. Expense saved but attachments may be missing.");
       }
 
-      // Only submit for approval if creating new expense and not draft
-      if (!expenseId && !isDraft) {
-        await submitForApproval(savedExpenseId, teamId);
-      }
+      // Status is already set correctly (recurent or draft)
+      // PLATA toggle will change status to final when clicked by user
 
       setShowSuccessModal(true);
     } catch (err) {
