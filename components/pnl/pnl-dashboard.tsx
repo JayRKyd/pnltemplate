@@ -111,6 +111,8 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [editingRevenue, setEditingRevenue] = useState<number | null>(null);
   const [revenueInputs, setRevenueInputs] = useState<Record<number, string>>({});
+  // Client-side only ordered months (to avoid SSR hydration mismatch)
+  const [orderedMonthIndices, setOrderedMonthIndices] = useState<number[]>([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 
   // Budget upload
   const [uploadingBudget, setUploadingBudget] = useState(false);
@@ -155,6 +157,11 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Calculate ordered months on client-side only to avoid SSR hydration mismatch
+  useEffect(() => {
+    setOrderedMonthIndices(getOrderedMonths(selectedYear));
+  }, [selectedYear]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -282,9 +289,6 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
     }
     categoryGroups.get(catName)!.push(exp);
   });
-
-  // Get ordered months for current view
-  const orderedMonthIndices = getOrderedMonths(selectedYear);
 
   // Reorder pnlSummary based on rolling 12-month logic
   const orderedPnlSummary = orderedMonthIndices
