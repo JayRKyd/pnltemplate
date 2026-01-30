@@ -13,7 +13,8 @@ export default function PnlPage() {
   const params = useParams<{ teamId: string }>();
   const plRef = useRef<{ resetCategory: () => void }>(null);
   
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true); // For initial page load
+  const [refreshing, setRefreshing] = useState(false); // For year changes (don't unmount PLStatement)
   const [pnlData, setPnlData] = useState<PnlData | null>(null);
   const [venituri, setVenituri] = useState<number[]>(Array(24).fill(0));
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export default function PnlPage() {
         console.error("Error fetching P&L data:", err);
         setError("Eroare la încărcarea datelor P&L");
       } finally {
-        setLoading(false);
+        setInitialLoading(false);
       }
     };
 
@@ -75,7 +76,7 @@ export default function PnlPage() {
 
   // Handle budget upload - refresh P&L data
   const handleBudgetUploaded = async () => {
-    setLoading(true);
+    setRefreshing(true);
     try {
       const data = await getPnlData(params.teamId, currentYear);
       setPnlData(data);
@@ -83,11 +84,12 @@ export default function PnlPage() {
     } catch (err) {
       console.error("Error refreshing P&L data:", err);
     } finally {
-      setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  if (loading) {
+  // Only show full-page loading for initial load
+  if (initialLoading) {
     return (
       <div className="min-h-screen bg-[#F8F9FA] flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -109,7 +111,16 @@ export default function PnlPage() {
   }
 
   return (
-    <div className="p-6 md:p-8 space-y-4">
+    <div className="p-6 md:p-8 space-y-4 relative">
+      {/* Loading overlay for year changes - doesn't unmount PLStatement */}
+      {refreshing && (
+        <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-50 rounded-xl">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
+            <p className="text-gray-500">Se actualizează...</p>
+          </div>
+        </div>
+      )}
       <PLStatement
         ref={plRef}
         onBack={() => router.back()}
@@ -122,8 +133,8 @@ export default function PnlPage() {
         onBudgetUploaded={handleBudgetUploaded}
         getCategoryExpensesFn={getCategoryExpenses}
         onYearChange={(year) => {
-          // Refetch P&L data when year changes
-          setLoading(true);
+          // Refetch P&L data when year changes - use refreshing state to keep PLStatement mounted
+          setRefreshing(true);
           getPnlData(params.teamId, parseInt(year))
             .then(data => {
               setPnlData(data);
@@ -133,7 +144,7 @@ export default function PnlPage() {
               console.error("Error fetching P&L data for year", year, err);
               setError("Eroare la încărcarea datelor P&L");
             })
-            .finally(() => setLoading(false));
+            .finally(() => setRefreshing(false));
         }}
       />
     </div>
