@@ -60,6 +60,8 @@ interface PLStatementProps {
   onBudgetUploaded?: () => void;
   // Function to fetch category expenses for popup
   getCategoryExpensesFn?: (teamId: string, categoryName: string, year: number, month: number) => Promise<any[]>;
+  // Callback when year changes to refresh P&L data
+  onYearChange?: (year: string) => void;
 }
 
 interface Subcategory {
@@ -108,7 +110,7 @@ const mockInvoices: Invoice[] = [
 ];
 
 export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatementProps>(
-  ({ onBack, venituri, setVenituri, realData, teamId, onSaveBudgetTemplate, onBudgetUploaded, getCategoryExpensesFn }, ref) => {
+  ({ onBack, venituri, setVenituri, realData, teamId, onSaveBudgetTemplate, onBudgetUploaded, getCategoryExpensesFn, onYearChange }, ref) => {
     const [activeTab, setActiveTab] = useState<'expenses' | 'budget' | 'delta'>('expenses');
     const [selectedCurrency, setSelectedCurrency] = useState<'EUR' | 'RON'>('EUR');
     const [selectedYear, setSelectedYear] = useState('2026');
@@ -160,19 +162,51 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
         
         getCategoryExpensesFn(teamId, showInvoicesPopup.category, year, month)
           .then(data => {
+            console.log('Popup data received:', data);
             // Transform API data to match the expected format
-            const transformed = data.map((exp: any) => ({
-              id: exp.id,
-              date: exp.expense_date,
-              supplier: exp.supplier_name || 'N/A',
-              description: exp.description || '-',
-              invoiceNumber: exp.invoice_number || '-',
-              amount: exp.total_amount || 0,
-              status: exp.status,
-              category: exp.subcategory_name || exp.category_name,
-              subcategory: exp.subcategory_name,
-              type: exp.is_recurring ? 'recurente' : 'reale'
-            }));
+            const transformed = data.map((exp: any) => {
+              // Handle date - use expense_date or accounting_period or fallback to current date
+              let dateStr = exp.expense_date || exp.accounting_period;
+              let date;
+              if (dateStr) {
+                // Try to parse the date
+                date = new Date(dateStr);
+                // Check if valid date
+                if (isNaN(date.getTime())) {
+                  date = new Date();
+                }
+              } else {
+                date = new Date();
+              }
+              
+              // Handle amount - ensure it's a valid number
+              const amount = typeof exp.total_amount === 'number' ? exp.total_amount : 
+                            typeof exp.amount === 'number' ? exp.amount :
+                            parseFloat(exp.total_amount) || parseFloat(exp.amount) || 0;
+              
+              // Handle supplier - check multiple possible field names
+              const supplier = exp.supplier_name || exp.supplier || exp.furnizor || 'N/A';
+              
+              // Handle description
+              const description = exp.description || exp.descriere || '-';
+              
+              // Handle invoice number
+              const invoiceNumber = exp.invoice_number || exp.numar_factura || '-';
+              
+              return {
+                id: exp.id,
+                date: date.toISOString(),
+                supplier: supplier,
+                description: description,
+                invoiceNumber: invoiceNumber,
+                amount: amount,
+                status: exp.status || 'Final',
+                category: exp.subcategory_name || exp.category_name || showInvoicesPopup.category,
+                subcategory: exp.subcategory_name,
+                type: exp.is_recurring ? 'recurente' : 'reale'
+              };
+            });
+            console.log('Transformed popup data:', transformed);
             setPopupInvoices(transformed);
           })
           .catch(err => {
@@ -767,7 +801,10 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                         </button>
                         <CustomSelect
                           value={selectedYear}
-                          onChange={setSelectedYear}
+                          onChange={(value) => {
+                            setSelectedYear(value);
+                            onYearChange?.(value);
+                          }}
                           options={[{ value: '2026', label: '2026' }, { value: '2025', label: '2025' }, { value: '2024', label: '2024' }]}
                           className="w-24 px-4 py-2 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:border-transparent"
                         />
@@ -797,7 +834,10 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                         />
                         <CustomSelect
                           value={selectedYear}
-                          onChange={setSelectedYear}
+                          onChange={(value) => {
+                            setSelectedYear(value);
+                            onYearChange?.(value);
+                          }}
                           options={[{ value: '2026', label: '2026' }, { value: '2025', label: '2025' }, { value: '2024', label: '2024' }]}
                           className="w-24 px-4 py-2 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:border-transparent"
                         />

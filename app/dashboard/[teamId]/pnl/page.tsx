@@ -121,6 +121,20 @@ export default function PnlPage() {
         onSaveBudgetTemplate={handleSaveBudgetTemplate}
         onBudgetUploaded={handleBudgetUploaded}
         getCategoryExpensesFn={getCategoryExpenses}
+        onYearChange={(year) => {
+          // Refetch P&L data when year changes
+          setLoading(true);
+          getPnlData(params.teamId, parseInt(year))
+            .then(data => {
+              setPnlData(data);
+              setVenituri(data.venituri);
+            })
+            .catch(err => {
+              console.error("Error fetching P&L data for year", year, err);
+              setError("Eroare la încărcarea datelor P&L");
+            })
+            .finally(() => setLoading(false));
+        }}
       />
     </div>
   );
