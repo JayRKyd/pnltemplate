@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useState, forwardRef, useImperativeHandle, useRef } from 'react';
+import React, { useState, forwardRef, useImperativeHandle, useRef, useEffect } from 'react';
 import { RefreshCw, Download, Check, Upload, ChevronRight, ChevronDown, X, Loader2 } from 'lucide-react';
 import { CustomSelect } from './customselect';
 import { CategoryDetail } from './categorydetail';
@@ -58,6 +58,8 @@ interface PLStatementProps {
   onSaveBudgetTemplate?: (teamId: string, template: BudgetTemplate) => Promise<{ success: boolean; error?: string }>;
   // Callback when budget is uploaded to refresh data
   onBudgetUploaded?: () => void;
+  // Function to fetch category expenses for popup
+  getCategoryExpensesFn?: (teamId: string, categoryName: string, year: number, month: number) => Promise<any[]>;
 }
 
 interface Subcategory {
@@ -106,7 +108,7 @@ const mockInvoices: Invoice[] = [
 ];
 
 export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatementProps>(
-  ({ onBack, venituri, setVenituri, realData, teamId, onSaveBudgetTemplate, onBudgetUploaded }, ref) => {
+  ({ onBack, venituri, setVenituri, realData, teamId, onSaveBudgetTemplate, onBudgetUploaded, getCategoryExpensesFn }, ref) => {
     const [activeTab, setActiveTab] = useState<'expenses' | 'budget' | 'delta'>('expenses');
     const [selectedCurrency, setSelectedCurrency] = useState<'EUR' | 'RON'>('EUR');
     const [selectedYear, setSelectedYear] = useState('2026');
@@ -145,6 +147,41 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
       '14. Taxe si impozite': false,
     });
     const [showInvoicesPopup, setShowInvoicesPopup] = useState<{ category: string, month: string } | null>(null);
+    const [popupInvoices, setPopupInvoices] = useState<any[]>([]);
+    const [popupLoading, setPopupLoading] = useState(false);
+
+    // Fetch invoices when popup opens
+    useEffect(() => {
+      if (showInvoicesPopup && getCategoryExpensesFn && teamId) {
+        setPopupLoading(true);
+        const monthIndex = getMonthLabels().indexOf(showInvoicesPopup.month);
+        const month = monthIndex >= 0 ? monthIndex + 1 : 1;
+        const year = parseInt(selectedYear);
+        
+        getCategoryExpensesFn(teamId, showInvoicesPopup.category, year, month)
+          .then(data => {
+            // Transform API data to match the expected format
+            const transformed = data.map((exp: any) => ({
+              id: exp.id,
+              date: exp.expense_date,
+              supplier: exp.supplier_name || 'N/A',
+              description: exp.description || '-',
+              invoiceNumber: exp.invoice_number || '-',
+              amount: exp.total_amount || 0,
+              status: exp.status,
+              category: exp.subcategory_name || exp.category_name,
+              subcategory: exp.subcategory_name,
+              type: exp.is_recurring ? 'recurente' : 'reale'
+            }));
+            setPopupInvoices(transformed);
+          })
+          .catch(err => {
+            console.error('Error fetching category expenses:', err);
+            setPopupInvoices([]);
+          })
+          .finally(() => setPopupLoading(false));
+      }
+    }, [showInvoicesPopup, getCategoryExpensesFn, teamId, selectedYear]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [uploadingBudget, setUploadingBudget] = useState(false);
     const [uploadedBudgets, setUploadedBudgets] = useState<{[year: string]: string}>({
@@ -1050,11 +1087,14 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
 
                       {/* Content */}
                       <div className="overflow-y-auto flex-1 p-8 bg-white">
-                        {(() => {
-                          const relevantInvoices = invoices.filter(i => i.category === showInvoicesPopup.category || i.subcategory === showInvoicesPopup.category);
-                          const realInvoices = relevantInvoices.filter(i => i.type === 'reale');
-                          const recurrentInvoices = relevantInvoices.filter(i => i.type === 'recurente');
-                          const total = relevantInvoices.reduce((sum, i) => sum + i.amount, 0);
+                        {popupLoading ? (
+                          <div className="flex items-center justify-center py-12">
+                            <Loader2 className="w-8 h-8 animate-spin text-teal-500" />
+                          </div>
+                        ) : (() => {
+                          const realInvoices = popupInvoices.filter(i => i.type === 'reale');
+                          const recurrentInvoices = popupInvoices.filter(i => i.type === 'recurente');
+                          const total = popupInvoices.reduce((sum, i) => sum + i.amount, 0);
 
                           return (
                             <div className="space-y-8">
@@ -1110,14 +1150,14 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                                 </div>
                               )}
 
-                              {relevantInvoices.length === 0 && (
+                              {popupInvoices.length === 0 && !popupLoading && (
                                 <div className="text-center py-12 text-gray-500">
                                   Nu există facturi pentru această perioadă.
                                 </div>
                               )}
 
                               {/* Total */}
-                              {relevantInvoices.length > 0 && (
+                              {popupInvoices.length > 0 && (
                                 <div className="border-t border-gray-100 mt-8 pt-6 flex justify-end items-center gap-8 px-4">
                                   <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">TOTAL</span>
                                   <span className="text-xl font-bold text-gray-900">{formatAmount(total)} Lei</span>

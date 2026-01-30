@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PLStatement } from "@/testcode/plstatement";
-import { getPnlData, PnlData, updateRevenue } from "@/app/actions/pnl-data";
+import { getPnlData, PnlData, updateRevenue, getCategoryExpenses } from "@/app/actions/pnl-data";
 import { saveBudgetTemplate } from "@/app/actions/budget-template";
 import { BudgetTemplate } from "@/testcode/budgettemplateform";
 import { Loader2 } from "lucide-react";
@@ -120,6 +120,7 @@ export default function PnlPage() {
         teamId={params.teamId}
         onSaveBudgetTemplate={handleSaveBudgetTemplate}
         onBudgetUploaded={handleBudgetUploaded}
+        getCategoryExpensesFn={getCategoryExpenses}
       />
     </div>
   );
