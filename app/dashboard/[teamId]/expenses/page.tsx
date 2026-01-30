@@ -671,10 +671,16 @@ export default function ExpensesPage() {
                   }
                 );
               } else {
+                // For regular expenses: when marking as paid, also change status to approved (Final)
+                // When marking as unpaid, change status back to recurent
+                const newStatus = newPaymentStatus === 'paid' ? 'approved' : 'recurent';
                 await updateExpense(
                   paymentModalData.expenseId,
                   params.teamId,
-                  { paymentStatus: newPaymentStatus as 'paid' | 'unpaid' }
+                  { 
+                    paymentStatus: newPaymentStatus as 'paid' | 'unpaid',
+                    status: newStatus
+                  }
                 );
               }
               // Reload expenses to reflect the change
