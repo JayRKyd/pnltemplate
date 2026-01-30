@@ -573,7 +573,7 @@ export default function ExpensesPage() {
       }
     } else {
       // Regular expense (not recurring)
-      displayStatus = exp.status === 'approved' ? 'Final' : exp.status === 'draft' ? 'Draft' : 'Final';
+      displayStatus = exp.status === 'approved' ? 'Final' : exp.status === 'draft' ? 'Draft' : exp.status === 'recurent' ? 'Recurent' : 'Final';
     }
     
     return {
