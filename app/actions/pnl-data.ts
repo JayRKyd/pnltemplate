@@ -355,6 +355,7 @@ export async function getPnlData(
 
 /**
  * Get expenses for a specific category and month (for invoice popup)
+ * Uses accounting_period (Luna P&L) if available, otherwise falls back to expense_date
  */
 export async function getCategoryExpenses(
   teamId: string,
@@ -379,15 +380,14 @@ export async function getCategoryExpenses(
     return [];
   }
 
-  // Get expenses for this category in the specified month
-  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endDate = new Date(year, month, 0).toISOString().split('T')[0]; // Last day of month
-
+  // Get all expenses for this category (we'll filter by month in code)
+  // Include 'draft', 'recurent', 'final' status so all expenses show up
   const { data: expenses } = await supabase
     .from("team_expenses")
     .select(`
       id,
       expense_date,
+      accounting_period,
       supplier,
       description,
       doc_number,
@@ -401,10 +401,23 @@ export async function getCategoryExpenses(
     .eq("team_id", teamId)
     .is("deleted_at", null)
     .or(`category_id.eq.${category.id},subcategory_id.eq.${category.id}`)
-    .gte("expense_date", startDate)
-    .lte("expense_date", endDate);
+    .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]);
 
-  return (expenses || []).map(e => ({
+  // Filter expenses by accounting_period (Luna P&L) or expense_date
+  const targetMonthStr = String(month).padStart(2, '0');
+  const targetAccountingPeriod = `${year}-${targetMonthStr}`;
+  
+  const filteredExpenses = (expenses || []).filter(e => {
+    // First check if accounting_period matches (priority)
+    if (e.accounting_period) {
+      return e.accounting_period === targetAccountingPeriod;
+    }
+    // Fallback to expense_date
+    const expenseDate = new Date(e.expense_date);
+    return expenseDate.getFullYear() === year && expenseDate.getMonth() + 1 === month;
+  });
+
+  return filteredExpenses.map(e => ({
     id: e.id,
     date: e.expense_date,
     supplier: e.supplier || 'Unknown',

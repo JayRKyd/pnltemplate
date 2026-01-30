@@ -1,0 +1,42 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - link "P&L" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e6]: P&L
+      - button [ref=e8] [cursor=pointer]:
+        - img [ref=e12]
+    - generic [ref=e18]:
+      - generic [ref=e19]:
+        - heading "Sign in to your account" [level=2] [ref=e20]
+        - paragraph [ref=e21]:
+          - text: Don't have an account?
+          - link "Sign up" [ref=e22] [cursor=pointer]:
+            - /url: /handler/sign-up
+      - generic [ref=e24]:
+        - button "Sign in with GitHub" [ref=e25] [cursor=pointer]:
+          - generic [ref=e26]:
+            - img [ref=e27]
+            - generic [ref=e29]: Sign in with GitHub
+        - button "Sign in with Google" [ref=e30] [cursor=pointer]:
+          - generic [ref=e31]:
+            - img [ref=e32]
+            - generic [ref=e38]: Sign in with Google
+      - generic [ref=e41]: Or continue with
+      - generic [ref=e43]:
+        - generic [ref=e44]: Email
+        - textbox "Email" [ref=e45]
+        - generic [ref=e46]: Password
+        - generic [ref=e47]:
+          - textbox "Password" [ref=e48]
+          - button "Show password" [ref=e49] [cursor=pointer]:
+            - img [ref=e50]
+        - link "Forgot password?" [ref=e55] [cursor=pointer]:
+          - /url: /handler/forgot-password
+        - button "Sign In" [ref=e56] [cursor=pointer]:
+          - generic [ref=e57]: Sign In
+```
