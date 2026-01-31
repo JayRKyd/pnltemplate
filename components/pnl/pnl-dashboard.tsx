@@ -113,6 +113,8 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   const [revenueInputs, setRevenueInputs] = useState<Record<number, string>>({});
   // Track if component is mounted (for client-side only calculations)
   const [isMounted, setIsMounted] = useState(false);
+  // Ordered month indices with rolling logic for current year
+  const [orderedMonthIndices, setOrderedMonthIndices] = useState([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 
   // Budget upload
   const [uploadingBudget, setUploadingBudget] = useState(false);
@@ -164,9 +166,18 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   }, []);
 
   // Calculate ordered months - default order on server, rolling order on client
-  const orderedMonthIndices = isMounted
-    ? getOrderedMonths(selectedYear)
-    : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  useEffect(() => {
+    const { month: currentMonth, year: currentYear } = getCurrentMonthInfo();
+    if (selectedYear === currentYear) {
+      const ordered: number[] = [];
+      for (let i = 1; i <= 12; i++) {
+        ordered.push((currentMonth + i) % 12);
+      }
+      setOrderedMonthIndices(ordered);
+    } else {
+      setOrderedMonthIndices([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    }
+  }, [selectedYear]);
 
   const handleExport = async () => {
     setExporting(true);
