@@ -111,8 +111,8 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [editingRevenue, setEditingRevenue] = useState<number | null>(null);
   const [revenueInputs, setRevenueInputs] = useState<Record<number, string>>({});
-  // Client-side only ordered months (to avoid SSR hydration mismatch)
-  const [orderedMonthIndices, setOrderedMonthIndices] = useState<number[]>([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  // Track if component is mounted (for client-side only calculations)
+  const [isMounted, setIsMounted] = useState(false);
 
   // Budget upload
   const [uploadingBudget, setUploadingBudget] = useState(false);
@@ -158,10 +158,15 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
     loadData();
   }, [loadData]);
 
-  // Calculate ordered months on client-side only to avoid SSR hydration mismatch
+  // Mark component as mounted (client-side only)
   useEffect(() => {
-    setOrderedMonthIndices(getOrderedMonths(selectedYear));
-  }, [selectedYear]);
+    setIsMounted(true);
+  }, []);
+
+  // Calculate ordered months - default order on server, rolling order on client
+  const orderedMonthIndices = isMounted
+    ? getOrderedMonths(selectedYear)
+    : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
   const handleExport = async () => {
     setExporting(true);
