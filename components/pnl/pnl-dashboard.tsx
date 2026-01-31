@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Download,
   RefreshCw,
@@ -111,10 +111,23 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [editingRevenue, setEditingRevenue] = useState<number | null>(null);
   const [revenueInputs, setRevenueInputs] = useState<Record<number, string>>({});
-  // Track if month order is ready (prevents flash of wrong order during SSR/hydration)
-  const [orderReady, setOrderReady] = useState(false);
-  // Ordered month indices with rolling logic for current year
-  const [orderedMonthIndices, setOrderedMonthIndices] = useState([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  // Compute ordered month indices using useMemo - recalculates when loading changes
+  const orderedMonthIndices = useMemo(() => {
+    // Only compute rolling order when data has loaded (client-side)
+    if (!loading) {
+      const { month: currentMonth, year: currentYear } = getCurrentMonthInfo();
+      if (selectedYear === currentYear) {
+        const ordered: number[] = [];
+        for (let i = 1; i <= 12; i++) {
+          ordered.push((currentMonth + i) % 12);
+        }
+        console.log('useMemo - Rolling order:', ordered);
+        return ordered;
+      }
+    }
+    console.log('useMemo - Standard order');
+    return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  }, [loading, selectedYear]);
 
   // Budget upload
   const [uploadingBudget, setUploadingBudget] = useState(false);
@@ -141,21 +154,6 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
       setRevenues(revenueData);
       setPnlCategories(pnlData.categories);
       setCheltuieliTotal(pnlData.cheltuieli);
-
-      // Calculate ordered months - this runs client-side after data load
-      const { month: currentMonth, year: currentYear } = getCurrentMonthInfo();
-      if (selectedYear === currentYear) {
-        const ordered: number[] = [];
-        for (let i = 1; i <= 12; i++) {
-          ordered.push((currentMonth + i) % 12);
-        }
-        console.log('loadData - Setting rolling order:', ordered);
-        setOrderedMonthIndices(ordered);
-      } else {
-        console.log('loadData - Setting standard order');
-        setOrderedMonthIndices([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
-      }
-      setOrderReady(true);
 
       // Initialize revenue inputs
       const inputs: Record<number, string> = {};
@@ -316,7 +314,7 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
     }).format(value);
   };
 
-  if (loading || !orderReady) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Loader2 className="w-8 h-8 animate-spin text-teal-500" />
