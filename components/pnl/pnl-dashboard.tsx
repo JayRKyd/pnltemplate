@@ -168,13 +168,16 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   // Calculate ordered months - default order on server, rolling order on client
   useEffect(() => {
     const { month: currentMonth, year: currentYear } = getCurrentMonthInfo();
+    console.log('useEffect fired:', { selectedYear, currentYear, currentMonth });
     if (selectedYear === currentYear) {
       const ordered: number[] = [];
       for (let i = 1; i <= 12; i++) {
         ordered.push((currentMonth + i) % 12);
       }
+      console.log('Setting rolling order for current year:', ordered);
       setOrderedMonthIndices(ordered);
     } else {
+      console.log('Setting standard order for past year');
       setOrderedMonthIndices([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
   }, [selectedYear]);
