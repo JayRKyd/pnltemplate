@@ -111,8 +111,8 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [editingRevenue, setEditingRevenue] = useState<number | null>(null);
   const [revenueInputs, setRevenueInputs] = useState<Record<number, string>>({});
-  // Track if component is mounted (for client-side only calculations)
-  const [isMounted, setIsMounted] = useState(false);
+  // Track if month order is ready (prevents flash of wrong order during SSR/hydration)
+  const [orderReady, setOrderReady] = useState(false);
   // Ordered month indices with rolling logic for current year
   const [orderedMonthIndices, setOrderedMonthIndices] = useState([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 
@@ -160,11 +160,6 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
     loadData();
   }, [loadData]);
 
-  // Mark component as mounted (client-side only)
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
   // Calculate ordered months - default order on server, rolling order on client
   useEffect(() => {
     const { month: currentMonth, year: currentYear } = getCurrentMonthInfo();
@@ -180,6 +175,7 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
       console.log('Setting standard order for past year');
       setOrderedMonthIndices([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
+    setOrderReady(true);
   }, [selectedYear]);
 
   const handleExport = async () => {
@@ -322,7 +318,7 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
     }).format(value);
   };
 
-  if (loading) {
+  if (loading || !orderReady) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Loader2 className="w-8 h-8 animate-spin text-teal-500" />
