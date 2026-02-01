@@ -500,30 +500,53 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
       return selectedYear === '2026' ? 12 : (selectedYear === '2025' ? 12 : 0);
     };
 
+    // Get ordered month indices - rolling for current year, standard for past years
+    const getOrderedMonthIndices = (): number[] => {
+      const now = new Date();
+      const currentMonth = now.getMonth(); // 0-11
+      const currentYearNum = now.getFullYear();
+      const viewingYear = parseInt(selectedYear);
+      
+      if (viewingYear === currentYearNum) {
+        // Rolling 12 months: current month at END
+        // E.g., if current month is Jan (0), order is: Feb(1), Mar(2)...Dec(11), Jan(0)
+        const ordered: number[] = [];
+        for (let i = 1; i <= 12; i++) {
+          ordered.push((currentMonth + i) % 12);
+        }
+        return ordered;
+      }
+      // Past years: Jan-Dec in normal order (0-11)
+      return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    };
+
     // Get the data for the current view
     // Data from getPnlData(X) has structure: [X-1 Jan-Dec (0-11), X Jan-Dec (12-23)]
     // When viewing year X, we want indices 12-23 to show the CURRENT YEAR (X)
     const getYearData = (values: number[]) => {
-      // Both P&L Realizat and Budget view now show calendar year of selected year
-      // Data indices 12-23 = Jan-Dec of the selected year
-      return values.slice(12, 24);
+      // Get data for selected year (indices 12-23)
+      const yearData = values.slice(12, 24);
+      // Reorder according to rolling month order
+      const orderedIndices = getOrderedMonthIndices();
+      return orderedIndices.map(monthIndex => yearData[monthIndex] || 0);
     };
 
-    // Get month labels - always calendar year (Jan-Dec)
+    // Get month labels - rolling for current year, standard for past years
     const getMonthLabels = () => {
-      return ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const allMonths = ['IAN', 'FEB', 'MAR', 'APR', 'MAI', 'IUN', 'IUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const orderedIndices = getOrderedMonthIndices();
+      return orderedIndices.map(index => allMonths[index]);
     };
 
     // Determine if an index is the current month (highlight current month)
     const isCurrentMonth = (index: number) => {
       if (activeTab === 'budget') return false; // No current month highlight in budget view
-      // Get current month (0-based)
       const now = new Date();
-      const currentMonth = now.getMonth(); // 0 = Jan, 11 = Dec
       const currentYearNum = now.getFullYear();
       // Only highlight if viewing current year
       if (parseInt(selectedYear) !== currentYearNum) return false;
-      return index === currentMonth;
+      // In rolling order, current month is always at the END (index 11)
+      return index === 11;
     };
 
     // Get column styles for highlights

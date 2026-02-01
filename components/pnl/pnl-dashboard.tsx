@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Download,
   RefreshCw,
@@ -13,34 +13,19 @@ import {
   BarChart3,
   Upload,
   Loader2,
-  Check,
 } from "lucide-react";
 import {
-  getPnlSummary,
-  getExpensesByCategory,
-  getBudgets,
-  getRevenues,
   upsertRevenue,
-  getAvailableYears,
   generateBudgetTemplate,
   importBudgetFromExcel,
   PnlSummary,
-  CategoryExpense,
-  BudgetWithCategory,
-  Revenue,
 } from "@/app/actions/budget";
-import { getPnlData, PnlCategory } from "@/app/actions/pnl-data";
+import { getPnlDashboardData, PnlCategory, BudgetRow } from "@/app/actions/pnl-data";
 import { exportPnlToExcel } from "@/app/actions/export";
-import { getUserPermissions } from "@/app/actions/permissions";
 
 const MONTH_NAMES = [
   "IAN", "FEB", "MAR", "APR", "MAI", "IUN",
   "IUL", "AUG", "SEP", "OCT", "NOI", "DEC"
-];
-
-const MONTH_FULL_NAMES = [
-  "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
-  "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie"
 ];
 
 // Current month highlight style
@@ -54,40 +39,10 @@ interface PnlDashboardProps {
   teamId: string;
 }
 
-// Helper to get current month (0-indexed) and year
-const getCurrentMonthInfo = () => {
-  const now = new Date();
-  return {
-    month: now.getMonth(), // 0-11
-    year: now.getFullYear(),
-  };
-};
-
-// Reorder months for rolling 12-month view (current month at end)
-// For current year: shows rolling 12 months with current month at the end
-// For past years: shows Jan-Dec in normal order
-const getOrderedMonths = (selectedYear: number): number[] => {
-  const { month: currentMonth, year: currentYear } = getCurrentMonthInfo();
-
-  if (selectedYear === currentYear) {
-    // Rolling 12 months: current month at end
-    // E.g., if current month is March (2), order is: Apr(3), May(4)...Dec(11), Jan(0), Feb(1), Mar(2)
-    const ordered: number[] = [];
-    for (let i = 1; i <= 12; i++) {
-      const monthIndex = (currentMonth + i) % 12;
-      ordered.push(monthIndex);
-    }
-    return ordered;
-  }
-
-  // Past years: Jan-Dec in normal order (0-11)
-  return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-};
-
 // Check if a month index is the current month (for highlighting)
 const isCurrentMonthCheck = (monthIndex: number, selectedYear: number): boolean => {
-  const { month: currentMonth, year: currentYear } = getCurrentMonthInfo();
-  return selectedYear === currentYear && monthIndex === currentMonth;
+  const now = new Date();
+  return selectedYear === now.getFullYear() && monthIndex === now.getMonth();
 };
 
 export function PnlDashboard({ teamId }: PnlDashboardProps) {
@@ -98,68 +53,57 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   const [exporting, setExporting] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Data
+  // Data - consolidated
   const [pnlSummary, setPnlSummary] = useState<PnlSummary[]>([]);
-  const [categoryExpenses, setCategoryExpenses] = useState<CategoryExpense[]>([]);
-  const [budgets, setBudgets] = useState<BudgetWithCategory[]>([]);
-  const [revenues, setRevenues] = useState<Revenue[]>([]);
-  // P&L grid data (monthly by category)
   const [pnlCategories, setPnlCategories] = useState<PnlCategory[]>([]);
   const [cheltuieliTotal, setCheltuieliTotal] = useState<number[]>(Array(24).fill(0));
+  const [budgets, setBudgets] = useState<BudgetRow[]>([]);
 
   // UI State
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
-  const [editingRevenue, setEditingRevenue] = useState<number | null>(null);
   const [revenueInputs, setRevenueInputs] = useState<Record<number, string>>({});
-  // Compute ordered month indices using useMemo - recalculates when loading changes
-  const orderedMonthIndices = useMemo(() => {
-    // Only compute rolling order when data has loaded (client-side)
-    if (!loading) {
-      const { month: currentMonth, year: currentYear } = getCurrentMonthInfo();
-      if (selectedYear === currentYear) {
-        const ordered: number[] = [];
-        for (let i = 1; i <= 12; i++) {
-          ordered.push((currentMonth + i) % 12);
-        }
-        console.log('useMemo - Rolling order:', ordered);
-        return ordered;
+
+  // Compute ordered month indices - current month at end for current year
+  const getMonthOrder = (): number[] => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    if (selectedYear === currentYear) {
+      // Rolling 12 months: current month at end
+      const ordered: number[] = [];
+      for (let i = 1; i <= 12; i++) {
+        ordered.push((currentMonth + i) % 12);
       }
+      return ordered;
     }
-    console.log('useMemo - Standard order');
     return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-  }, [loading, selectedYear]);
+  };
+
+  const orderedMonthIndices = getMonthOrder();
 
   // Budget upload
   const [uploadingBudget, setUploadingBudget] = useState(false);
   const [uploadResult, setUploadResult] = useState<{ success: boolean; message: string } | null>(null);
 
+  // OPTIMIZED: Single API call instead of 7
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [years, permissions, summary, expenses, budgetData, revenueData, pnlData] = await Promise.all([
-        getAvailableYears(teamId),
-        getUserPermissions(teamId),
-        getPnlSummary(teamId, selectedYear),
-        getExpensesByCategory(teamId, selectedYear),
-        getBudgets(teamId, selectedYear),
-        getRevenues(teamId, selectedYear),
-        getPnlData(teamId, selectedYear),
-      ]);
+      const data = await getPnlDashboardData(teamId, selectedYear);
 
-      setAvailableYears(years);
-      setIsAdmin(permissions.role === "admin");
-      setPnlSummary(summary);
-      setCategoryExpenses(expenses);
-      setBudgets(budgetData);
-      setRevenues(revenueData);
-      setPnlCategories(pnlData.categories);
-      setCheltuieliTotal(pnlData.cheltuieli);
+      setAvailableYears(data.availableYears);
+      setIsAdmin(data.isAdmin);
+      setPnlSummary(data.pnlSummary);
+      setPnlCategories(data.pnlData.categories);
+      setCheltuieliTotal(data.pnlData.cheltuieli);
+      setBudgets(data.budgets);
 
-      // Initialize revenue inputs
+      // Initialize revenue inputs from pnlSummary
       const inputs: Record<number, string> = {};
       for (let m = 1; m <= 12; m++) {
-        const rev = revenueData.find((r) => r.month === m);
-        inputs[m] = rev ? rev.amount.toString() : "0";
+        const monthData = data.pnlSummary.find(s => s.month === m);
+        inputs[m] = (monthData?.revenue || 0).toString();
       }
       setRevenueInputs(inputs);
     } catch (err) {
@@ -260,14 +204,9 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
     }
   };
 
-  const handleRevenueChange = async (month: number, value: string) => {
-    setRevenueInputs((prev) => ({ ...prev, [month]: value }));
-  };
-
   const handleRevenueSave = async (month: number) => {
     const amount = parseFloat(revenueInputs[month]) || 0;
     await upsertRevenue(teamId, selectedYear, month, amount);
-    setEditingRevenue(null);
     await loadData();
   };
 
@@ -290,16 +229,6 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
   const ytdProfit = ytdRevenue - ytdExpenses;
   const ytdDelta = ytdBudget - ytdExpenses;
   const profitMargin = ytdRevenue > 0 ? (ytdProfit / ytdRevenue) * 100 : 0;
-
-  // Group expenses by category
-  const categoryGroups = new Map<string, CategoryExpense[]>();
-  categoryExpenses.forEach((exp) => {
-    const catName = exp.category_name || "Fără categorie";
-    if (!categoryGroups.has(catName)) {
-      categoryGroups.set(catName, []);
-    }
-    categoryGroups.get(catName)!.push(exp);
-  });
 
   // Reorder pnlSummary based on rolling 12-month logic
   const orderedPnlSummary = orderedMonthIndices
@@ -702,7 +631,7 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {budgets.map((b) => {
+                      {budgets.map((b: BudgetRow) => {
                         const monthKeys = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"] as const;
                         return (
                           <tr key={b.id} className="border-b border-gray-100 hover:bg-gray-50">
@@ -721,7 +650,7 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
                                   className="py-3 px-3 text-right"
                                   style={isCurrentMonth ? { backgroundColor: CURRENT_MONTH_STYLE.backgroundColor } : {}}
                                 >
-                                  {formatCurrency(Number(b[monthKey]) || 0)}
+                                  {formatCurrency(Number(b[monthKey as keyof BudgetRow]) || 0)}
                                 </td>
                               );
                             })}
@@ -737,7 +666,7 @@ export function PnlDashboard({ teamId }: PnlDashboardProps) {
                         {orderedMonthIndices.map((monthIndex) => {
                           const monthKeys = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"] as const;
                           const monthKey = monthKeys[monthIndex];
-                          const total = budgets.reduce((sum, b) => sum + (Number(b[monthKey]) || 0), 0);
+                          const total = budgets.reduce((sum: number, b: BudgetRow) => sum + (Number(b[monthKey as keyof BudgetRow]) || 0), 0);
                           const isCurrentMonth = isCurrentMonthCheck(monthIndex, selectedYear);
                           return (
                             <td

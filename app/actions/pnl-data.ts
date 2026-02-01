@@ -50,64 +50,71 @@ export async function getPnlData(
   baseYear: number = new Date().getFullYear()
 ): Promise<PnlData> {
   const prevYear = baseYear - 1;
-  
+
   // Initialize empty arrays for 24 months
   const emptyMonths = () => Array(24).fill(0);
 
-  // Get categories structure
-  const { data: categoriesData } = await supabase
-    .from("team_expense_categories")
-    .select("id, name, parent_id, sort_order, category_type")
-    .eq("team_id", teamId)
-    .eq("is_active", true)
-    .eq("category_type", "cheltuieli")
-    .order("sort_order", { ascending: true });
+  // OPTIMIZED: Fetch all data in parallel with a single Promise.all
+  const [categoriesResult, expensesResult, revenuesResult, budgetsResult] = await Promise.all([
+    // Get categories structure
+    supabase
+      .from("team_expense_categories")
+      .select("id, name, parent_id, sort_order, category_type")
+      .eq("team_id", teamId)
+      .eq("is_active", true)
+      .eq("category_type", "cheltuieli")
+      .order("sort_order", { ascending: true }),
+
+    // Get all expenses for both years
+    supabase
+      .from("team_expenses")
+      .select(`
+        id,
+        expense_date,
+        accounting_period,
+        supplier,
+        description,
+        doc_number,
+        amount,
+        amount_with_vat,
+        amount_without_vat,
+        vat_deductible,
+        status,
+        category_id,
+        subcategory_id,
+        is_recurring_placeholder
+      `)
+      .eq("team_id", teamId)
+      .is("deleted_at", null)
+      .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
+      .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`)
+      .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]),
+
+    // Get revenues for both years
+    supabase
+      .from("team_revenues")
+      .select("year, month, amount")
+      .eq("team_id", teamId)
+      .gte("year", prevYear)
+      .lte("year", baseYear),
+
+    // Get budgets for both years
+    supabase
+      .from("team_budgets")
+      .select("year, category_id, subcategory_id, jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec")
+      .eq("team_id", teamId)
+      .gte("year", prevYear)
+      .lte("year", baseYear),
+  ]);
+
+  const categoriesData = categoriesResult.data;
+  const expensesData = expensesResult.data;
+  const revenuesData = revenuesResult.data;
+  const budgetsData = budgetsResult.data;
 
   // Build category tree
   const parentCategories = categoriesData?.filter(c => !c.parent_id) || [];
   const childCategories = categoriesData?.filter(c => c.parent_id) || [];
-
-  // Get all expenses for both years
-  // Include 'draft' status so newly added expenses show up
-  const { data: expensesData } = await supabase
-    .from("team_expenses")
-    .select(`
-      id,
-      expense_date,
-      accounting_period,
-      supplier,
-      description,
-      doc_number,
-      amount,
-      amount_with_vat,
-      amount_without_vat,
-      vat_deductible,
-      status,
-      category_id,
-      subcategory_id,
-      is_recurring_placeholder
-    `)
-    .eq("team_id", teamId)
-    .is("deleted_at", null)
-    .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
-    .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`)
-    .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]);
-
-  // Get revenues for both years
-  const { data: revenuesData } = await supabase
-    .from("team_revenues")
-    .select("year, month, amount")
-    .eq("team_id", teamId)
-    .gte("year", prevYear)
-    .lte("year", baseYear);
-
-  // Get budgets for both years
-  const { data: budgetsData } = await supabase
-    .from("team_budgets")
-    .select("year, category_id, subcategory_id, jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec")
-    .eq("team_id", teamId)
-    .gte("year", prevYear)
-    .lte("year", baseYear);
 
   // Helper to get month index (0-23) from date
   // Uses accounting_period (Luna P&L) if available, otherwise falls back to expense_date
@@ -491,4 +498,296 @@ export async function updateRevenue(
   }
 
   return { success: true };
+}
+
+/**
+ * OPTIMIZED: Get all P&L dashboard data in a single call
+ * Combines: getPnlData + available years + user permissions
+ * Reduces 7+ API calls to 1 server action with parallel DB queries
+ */
+export interface BudgetRow {
+  id: string;
+  category_name: string;
+  subcategory_name: string | null;
+  jan: number;
+  feb: number;
+  mar: number;
+  apr: number;
+  may: number;
+  jun: number;
+  jul: number;
+  aug: number;
+  sep: number;
+  oct: number;
+  nov: number;
+  dec: number;
+  annual_total: number;
+}
+
+export interface PnlDashboardData {
+  pnlData: PnlData;
+  availableYears: number[];
+  isAdmin: boolean;
+  budgets: BudgetRow[];
+  pnlSummary: {
+    month: number;
+    revenue: number;
+    expenses: number;
+    budget: number;
+    profit: number;
+    delta: number;
+  }[];
+}
+
+export async function getPnlDashboardData(
+  teamId: string,
+  baseYear: number = new Date().getFullYear()
+): Promise<PnlDashboardData> {
+  const prevYear = baseYear - 1;
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
+
+  // Initialize empty arrays for 24 months
+  const emptyMonths = () => Array(24).fill(0);
+
+  // OPTIMIZED: Single Promise.all for ALL data
+  const [
+    categoriesResult,
+    expensesResult,
+    revenuesResult,
+    budgetsResult,
+    expenseYearsResult,
+    membershipResult,
+  ] = await Promise.all([
+    // Categories
+    supabase
+      .from("team_expense_categories")
+      .select("id, name, parent_id, sort_order, category_type")
+      .eq("team_id", teamId)
+      .eq("is_active", true)
+      .eq("category_type", "cheltuieli")
+      .order("sort_order", { ascending: true }),
+
+    // Expenses for both years
+    supabase
+      .from("team_expenses")
+      .select(`
+        id, expense_date, accounting_period, supplier, description,
+        doc_number, amount, amount_with_vat, amount_without_vat,
+        vat_deductible, status, category_id, subcategory_id, is_recurring_placeholder
+      `)
+      .eq("team_id", teamId)
+      .is("deleted_at", null)
+      .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
+      .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`)
+      .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]),
+
+    // Revenues
+    supabase
+      .from("team_revenues")
+      .select("year, month, amount")
+      .eq("team_id", teamId)
+      .gte("year", prevYear)
+      .lte("year", baseYear),
+
+    // Budgets with category names
+    supabase
+      .from("team_budgets")
+      .select(`
+        *,
+        category:team_expense_categories!team_budgets_category_id_fkey(name),
+        subcategory:team_expense_categories!team_budgets_subcategory_id_fkey(name)
+      `)
+      .eq("team_id", teamId)
+      .eq("year", baseYear),
+
+    // Years from expenses (for available years)
+    supabase
+      .from("team_expenses")
+      .select("expense_date")
+      .eq("team_id", teamId)
+      .is("deleted_at", null),
+
+    // User membership (for admin check)
+    supabase
+      .from("memberships")
+      .select("role")
+      .eq("team_id", teamId)
+      .single(),
+  ]);
+
+  const categoriesData = categoriesResult.data;
+  const expensesData = expensesResult.data;
+  const revenuesData = revenuesResult.data;
+  const budgetsData = budgetsResult.data;
+
+  // Build available years
+  const years = new Set<number>();
+  years.add(currentYear);
+  if (currentMonth >= 10) years.add(currentYear + 1);
+  expenseYearsResult.data?.forEach((e) => {
+    const y = new Date(e.expense_date).getFullYear();
+    if (y >= 2020 && y <= 2100) years.add(y);
+  });
+  const availableYears = Array.from(years).sort((a, b) => b - a);
+
+  // Check admin status
+  const isAdmin = membershipResult.data?.role === "admin";
+
+  // Build category tree
+  const parentCategories = categoriesData?.filter(c => !c.parent_id) || [];
+  const childCategories = categoriesData?.filter(c => c.parent_id) || [];
+
+  // Helper to get month index (0-23)
+  const getMonthIndex = (dateStr: string, accountingPeriodStr: string | null): number => {
+    if (accountingPeriodStr) {
+      const parts = accountingPeriodStr.split('-');
+      if (parts.length === 2) {
+        const year = parseInt(parts[0]);
+        const month = parseInt(parts[1]) - 1;
+        if (year === prevYear) return month;
+        if (year === baseYear) return month + 12;
+      }
+    }
+    const date = new Date(dateStr);
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    if (year === prevYear) return month;
+    if (year === baseYear) return month + 12;
+    return -1;
+  };
+
+  interface ExpenseRecord {
+    amount: number | null;
+    amount_with_vat: number | null;
+    amount_without_vat: number | null;
+    vat_deductible: boolean | null;
+  }
+
+  const getExpenseAmount = (expense: ExpenseRecord): number => {
+    if (expense.vat_deductible) {
+      return expense.amount_without_vat || expense.amount || 0;
+    }
+    return expense.amount_with_vat || expense.amount || 0;
+  };
+
+  // Calculate totals
+  const cheltuieli = emptyMonths();
+  expensesData?.forEach(expense => {
+    const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
+    if (idx >= 0 && idx < 24) {
+      cheltuieli[idx] += getExpenseAmount(expense);
+    }
+  });
+
+  // Build categories with monthly values
+  const categories: PnlCategory[] = parentCategories.map((parent) => {
+    const catValues = emptyMonths();
+    const subcats = childCategories.filter(c => c.parent_id === parent.id);
+
+    const subcategories = subcats.map((sub) => {
+      const subValues = emptyMonths();
+      expensesData?.forEach(expense => {
+        if (expense.subcategory_id === sub.id) {
+          const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
+          if (idx >= 0 && idx < 24) {
+            const amount = getExpenseAmount(expense);
+            subValues[idx] += amount;
+            catValues[idx] += amount;
+          }
+        }
+      });
+      return { id: sub.id, name: sub.name, values: subValues };
+    });
+
+    if (subcats.length === 0) {
+      expensesData?.forEach(expense => {
+        if (expense.category_id === parent.id) {
+          const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
+          if (idx >= 0 && idx < 24) {
+            catValues[idx] += getExpenseAmount(expense);
+          }
+        }
+      });
+    }
+
+    return { id: parent.id, name: parent.name, values: catValues, subcategories };
+  });
+
+  // Revenue per month
+  const venituri = emptyMonths();
+  revenuesData?.forEach(rev => {
+    const idx = rev.year === prevYear ? rev.month - 1 : rev.month - 1 + 12;
+    if (idx >= 0 && idx < 24) venituri[idx] += rev.amount || 0;
+  });
+
+  // Budget per month
+  const budget = emptyMonths();
+  const monthKeys = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  budgetsData?.forEach(b => {
+    monthKeys.forEach((key, monthIdx) => {
+      const value = (b as any)[key] || 0;
+      budget[monthIdx + 12] += value; // Only current year budgets
+    });
+  });
+
+  // Build P&L summary (12 months for selected year)
+  const pnlSummary = [];
+  for (let month = 1; month <= 12; month++) {
+    const idx = month - 1 + 12; // Index in 24-month array for current year
+    const revenue = venituri[idx];
+    const expenses = cheltuieli[idx];
+    const budgetAmt = budget[idx];
+    pnlSummary.push({
+      month,
+      revenue,
+      expenses,
+      budget: budgetAmt,
+      profit: revenue - expenses,
+      delta: budgetAmt - expenses,
+    });
+  }
+
+  return {
+    pnlData: {
+      cheltuieli,
+      categories,
+      venituri,
+      budget,
+      budgetCategories: categories, // Reuse for budget view
+      expenses: (expensesData || []).map(e => ({
+        id: e.id,
+        date: e.expense_date,
+        supplier: e.supplier || 'Unknown',
+        description: e.description || '',
+        invoiceNumber: e.doc_number || '',
+        amount: getExpenseAmount(e),
+        status: e.status || 'pending',
+        category: categoriesData?.find(c => c.id === e.category_id)?.name || 'Uncategorized',
+        subcategory: categoriesData?.find(c => c.id === e.subcategory_id)?.name || '',
+        type: e.is_recurring_placeholder ? 'recurente' : 'reale',
+      })),
+    },
+    availableYears,
+    isAdmin,
+    budgets: (budgetsData || []).map((b: any) => ({
+      id: b.id,
+      category_name: b.category?.name || 'Unknown',
+      subcategory_name: b.subcategory?.name || null,
+      jan: Number(b.jan) || 0,
+      feb: Number(b.feb) || 0,
+      mar: Number(b.mar) || 0,
+      apr: Number(b.apr) || 0,
+      may: Number(b.may) || 0,
+      jun: Number(b.jun) || 0,
+      jul: Number(b.jul) || 0,
+      aug: Number(b.aug) || 0,
+      sep: Number(b.sep) || 0,
+      oct: Number(b.oct) || 0,
+      nov: Number(b.nov) || 0,
+      dec: Number(b.dec) || 0,
+      annual_total: Number(b.annual_total) || 0,
+    })),
+    pnlSummary,
+  };
 }
