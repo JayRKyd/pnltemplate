@@ -332,6 +332,29 @@ export default function ExpensesPage() {
   
   const itemsPerPage = 20;
 
+  // OPTIMIZED: Debounce search to avoid API calls on every keystroke
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    // Clear previous timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // Set new timeout to update debounced value after 300ms
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearch(searchValue);
+    }, 300);
+
+    // Cleanup on unmount
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchValue]);
+
   // Status options
   const statusOptions: FilterOption[] = [
     { value: '', label: 'Toate' },
@@ -379,7 +402,8 @@ export default function ExpensesPage() {
     setLoading(true);
     try {
       const filters: ExpenseFilters = {};
-      if (searchValue) filters.search = searchValue;
+      // Use debounced search value to avoid API calls on every keystroke
+      if (debouncedSearch) filters.search = debouncedSearch;
       // Category and subcategory filters
       if (selectedCategory) {
         filters.categoryId = selectedCategory;
@@ -415,8 +439,8 @@ export default function ExpensesPage() {
       }
       
       // Apply client-side search for tags and user/colleague if search value exists
-      if (searchValue.trim()) {
-        const searchLower = searchValue.toLowerCase().trim();
+      if (debouncedSearch.trim()) {
+        const searchLower = debouncedSearch.toLowerCase().trim();
         
         // Get team members for user search
         let teamMembers: Array<{ user_id: string; name: string | null; email: string | null }> = [];
@@ -465,7 +489,7 @@ export default function ExpensesPage() {
     } finally {
       setLoading(false);
     }
-  }, [params.teamId, activeSubTab, searchValue, selectedCategory, selectedSubcategory, selectedStatus, selectedPayment, dateFrom, dateTo]);
+  }, [params.teamId, activeSubTab, debouncedSearch, selectedCategory, selectedSubcategory, selectedStatus, selectedPayment, dateFrom, dateTo]);
 
   const loadRecurringExpenses = useCallback(async () => {
     if (!params.teamId || !dateRange.startDate || !dateRange.endDate) return;
@@ -554,41 +578,43 @@ export default function ExpensesPage() {
     }
   };
 
-  // Map expenses to display format
-  const displayData = expenses.map(exp => {
-    // Determine status: Recurring placeholders show as "Recurent" until marked as paid
-    let displayStatus: 'Final' | 'Draft' | 'Recurent';
-    
-    if (exp.recurring_expense_id) {
-      // This is a recurring-linked expense
-      if (exp.is_recurring_placeholder || exp.status === 'placeholder') {
-        // Placeholder or not yet paid - show as Recurent
-        displayStatus = 'Recurent';
-      } else if (exp.payment_status === 'paid' || exp.status === 'approved' || exp.status === 'paid') {
-        // Marked as paid - show as Final
-        displayStatus = 'Final';
+  // OPTIMIZED: Memoize displayData to avoid recalculating on every render
+  const displayData = useMemo(() => {
+    return expenses.map(exp => {
+      // Determine status: Recurring placeholders show as "Recurent" until marked as paid
+      let displayStatus: 'Final' | 'Draft' | 'Recurent';
+
+      if (exp.recurring_expense_id) {
+        // This is a recurring-linked expense
+        if (exp.is_recurring_placeholder || exp.status === 'placeholder') {
+          // Placeholder or not yet paid - show as Recurent
+          displayStatus = 'Recurent';
+        } else if (exp.payment_status === 'paid' || exp.status === 'approved' || exp.status === 'paid') {
+          // Marked as paid - show as Final
+          displayStatus = 'Final';
+        } else {
+          // Recurring but not placeholder and not paid - show as Recurent
+          displayStatus = 'Recurent';
+        }
       } else {
-        // Recurring but not placeholder and not paid - show as Recurent
-        displayStatus = 'Recurent';
+        // Regular expense (not recurring)
+        displayStatus = exp.status === 'approved' ? 'Final' : exp.status === 'draft' ? 'Draft' : exp.status === 'recurent' ? 'Recurent' : 'Final';
       }
-    } else {
-      // Regular expense (not recurring)
-      displayStatus = exp.status === 'approved' ? 'Final' : exp.status === 'draft' ? 'Draft' : exp.status === 'recurent' ? 'Recurent' : 'Final';
-    }
-    
-    return {
-      status: displayStatus,
-      date: formatExpenseDate(exp.expense_date),
-      type: exp.doc_type || 'Factura',
-      provider: exp.supplier || '-',
-      description: exp.description || '-',
-      amount: formatAmountMain(exp.amount || 0),
-      decimals: formatAmountDecimals(exp.amount || 0),
-      paid: exp.payment_status === 'paid',
-      id: exp.id,
-      isRecurring: !!exp.recurring_expense_id
-    };
-  });
+
+      return {
+        status: displayStatus,
+        date: formatExpenseDate(exp.expense_date),
+        type: exp.doc_type || 'Factura',
+        provider: exp.supplier || '-',
+        description: exp.description || '-',
+        amount: formatAmountMain(exp.amount || 0),
+        decimals: formatAmountDecimals(exp.amount || 0),
+        paid: exp.payment_status === 'paid',
+        id: exp.id,
+        isRecurring: !!exp.recurring_expense_id
+      };
+    });
+  }, [expenses]);
 
   // Pagination calculations
   const totalItems = displayData.length;

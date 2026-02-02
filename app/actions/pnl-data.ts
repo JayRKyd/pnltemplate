@@ -1,6 +1,7 @@
 "use server";
 
 import { supabase } from "@/lib/supabase";
+import { unstable_cache } from "next/cache";
 
 export interface PnlCategory {
   id: string;
@@ -331,11 +332,12 @@ export async function getPnlData(
     };
   });
 
+  // Build category lookup Map for O(1) access (fixes O(n²) lookup)
+  const categoryMap = new Map<string, string>();
+  categoriesData?.forEach(c => categoryMap.set(c.id, c.name));
+
   // Build expenses list for invoice popup
   const expenses: PnlExpense[] = (expensesData || []).map(e => {
-    const cat = categoriesData?.find(c => c.id === e.category_id);
-    const subcat = categoriesData?.find(c => c.id === e.subcategory_id);
-    
     return {
       id: e.id,
       date: e.expense_date,
@@ -344,8 +346,8 @@ export async function getPnlData(
       invoiceNumber: e.doc_number || '',
       amount: getExpenseAmount(e),
       status: e.status || 'pending',
-      category: cat?.name || 'Uncategorized',
-      subcategory: subcat?.name || '',
+      category: (e.category_id && categoryMap.get(e.category_id)) || 'Uncategorized',
+      subcategory: (e.subcategory_id && categoryMap.get(e.subcategory_id)) || '',
       type: e.is_recurring_placeholder ? 'recurente' : 'reale',
     };
   });
@@ -539,9 +541,10 @@ export interface PnlDashboardData {
   }[];
 }
 
-export async function getPnlDashboardData(
+// Internal function that does the actual data fetching
+async function _fetchPnlDashboardData(
   teamId: string,
-  baseYear: number = new Date().getFullYear()
+  baseYear: number
 ): Promise<PnlDashboardData> {
   const prevYear = baseYear - 1;
   const currentYear = new Date().getFullYear();
@@ -550,28 +553,10 @@ export async function getPnlDashboardData(
   // Initialize empty arrays for 24 months
   const emptyMonths = () => Array(24).fill(0);
 
-  // Try to use optimized RPC function first (much faster)
-  // Falls back to regular queries if RPC not available
-  let useRpcData = false;
-  let rpcData: { cheltuieli: number[]; venituri: number[]; categories: PnlCategory[] } | null = null;
-
-  try {
-    const { data: rpcResult, error: rpcError } = await supabase.rpc('get_pnl_aggregated', {
-      p_team_id: teamId,
-      p_base_year: baseYear
-    });
-
-    if (!rpcError && rpcResult) {
-      rpcData = rpcResult;
-      useRpcData = true;
-      console.log('[getPnlDashboardData] Using optimized RPC function');
-    }
-  } catch (err) {
-    console.log('[getPnlDashboardData] RPC not available, using fallback queries');
-  }
-
-  // OPTIMIZED: Single Promise.all for ALL data
+  // OPTIMIZED: Run ALL queries in parallel including RPC
+  // This eliminates the sequential waterfall that was slowing down first load
   const [
+    rpcResult,
     categoriesResult,
     expensesResult,
     revenuesResult,
@@ -579,6 +564,18 @@ export async function getPnlDashboardData(
     expenseYearsResult,
     membershipResult,
   ] = await Promise.all([
+    // RPC for aggregated data (fastest path if available)
+    (async () => {
+      try {
+        return await supabase.rpc('get_pnl_aggregated', {
+          p_team_id: teamId,
+          p_base_year: baseYear
+        });
+      } catch {
+        return { data: null, error: { message: 'RPC not available' } };
+      }
+    })(),
+
     // Categories (always needed for structure)
     supabase
       .from("team_expense_categories")
@@ -588,31 +585,27 @@ export async function getPnlDashboardData(
       .eq("category_type", "cheltuieli")
       .order("sort_order", { ascending: true }),
 
-    // Expenses for both years - SKIP if using RPC (only fetch for popup details)
-    useRpcData
-      ? Promise.resolve({ data: [], error: null })
-      : supabase
-          .from("team_expenses")
-          .select(`
-            id, expense_date, accounting_period, supplier, description,
-            doc_number, amount, amount_with_vat, amount_without_vat,
-            vat_deductible, status, category_id, subcategory_id, is_recurring_placeholder
-          `)
-          .eq("team_id", teamId)
-          .is("deleted_at", null)
-          .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
-          .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`)
-          .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]),
+    // Expenses for both years (fallback if RPC fails)
+    supabase
+      .from("team_expenses")
+      .select(`
+        id, expense_date, accounting_period, supplier, description,
+        doc_number, amount, amount_with_vat, amount_without_vat,
+        vat_deductible, status, category_id, subcategory_id, is_recurring_placeholder
+      `)
+      .eq("team_id", teamId)
+      .is("deleted_at", null)
+      .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
+      .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`)
+      .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]),
 
-    // Revenues - SKIP if using RPC
-    useRpcData
-      ? Promise.resolve({ data: [], error: null })
-      : supabase
-          .from("team_revenues")
-          .select("year, month, amount")
-          .eq("team_id", teamId)
-          .gte("year", prevYear)
-          .lte("year", baseYear),
+    // Revenues (fallback if RPC fails)
+    supabase
+      .from("team_revenues")
+      .select("year, month, amount")
+      .eq("team_id", teamId)
+      .gte("year", prevYear)
+      .lte("year", baseYear),
 
     // Budgets with category names
     supabase
@@ -640,6 +633,14 @@ export async function getPnlDashboardData(
       .eq("team_id", teamId)
       .single(),
   ]);
+
+  // Check if RPC succeeded - use aggregated data if available
+  const useRpcData = !rpcResult.error && rpcResult.data;
+  const rpcData = rpcResult.data as { cheltuieli: number[]; venituri: number[]; categories: PnlCategory[] } | null;
+
+  if (useRpcData) {
+    console.log('[getPnlDashboardData] Using optimized RPC function');
+  }
 
   const categoriesData = categoriesResult.data;
   const expensesData = expensesResult.data;
@@ -801,18 +802,24 @@ export async function getPnlDashboardData(
       venituri,
       budget,
       budgetCategories: categories, // Reuse for budget view
-      expenses: (expensesData || []).map(e => ({
-        id: e.id,
-        date: e.expense_date,
-        supplier: e.supplier || 'Unknown',
-        description: e.description || '',
-        invoiceNumber: e.doc_number || '',
-        amount: getExpenseAmount(e),
-        status: e.status || 'pending',
-        category: categoriesData?.find(c => c.id === e.category_id)?.name || 'Uncategorized',
-        subcategory: categoriesData?.find(c => c.id === e.subcategory_id)?.name || '',
-        type: e.is_recurring_placeholder ? 'recurente' : 'reale',
-      })),
+      expenses: (() => {
+        // Build category lookup Map for O(1) access (fixes O(n²) lookup)
+        const catMap = new Map<string, string>();
+        categoriesData?.forEach(c => catMap.set(c.id, c.name));
+
+        return (expensesData || []).map(e => ({
+          id: e.id,
+          date: e.expense_date,
+          supplier: e.supplier || 'Unknown',
+          description: e.description || '',
+          invoiceNumber: e.doc_number || '',
+          amount: getExpenseAmount(e),
+          status: e.status || 'pending',
+          category: (e.category_id && catMap.get(e.category_id)) || 'Uncategorized',
+          subcategory: (e.subcategory_id && catMap.get(e.subcategory_id)) || '',
+          type: e.is_recurring_placeholder ? 'recurente' : 'reale',
+        }));
+      })(),
     },
     availableYears,
     isAdmin,
@@ -837,3 +844,22 @@ export async function getPnlDashboardData(
     pnlSummary,
   };
 }
+
+// OPTIMIZED: Cached version of getPnlDashboardData
+// Cache for 60 seconds to make subsequent loads instant while keeping data fresh
+export const getPnlDashboardData = async (
+  teamId: string,
+  baseYear: number = new Date().getFullYear()
+): Promise<PnlDashboardData> => {
+  // Create cached function with team-specific cache key
+  const cachedFetch = unstable_cache(
+    async () => _fetchPnlDashboardData(teamId, baseYear),
+    [`pnl-dashboard-${teamId}-${baseYear}`],
+    {
+      revalidate: 60, // Cache for 60 seconds
+      tags: [`pnl-${teamId}`], // Tag for manual invalidation
+    }
+  );
+
+  return cachedFetch();
+};

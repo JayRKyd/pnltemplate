@@ -92,6 +92,19 @@ export interface ExpenseFilters {
   search?: string;
 }
 
+export interface PaginationOptions {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PaginatedExpenses {
+  data: TeamExpenseListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 // Lightweight type for expense list view (optimized - smaller payload)
 export interface TeamExpenseListItem {
   id: string;
@@ -178,16 +191,18 @@ export async function getTeamExpenses(
     query = query.overlaps("tags", filters.tags);
   }
   if (filters?.search) {
-    // Search in supplier, description, expense_uid, and tags
-    // For tags (array field), we need to use a different approach
-    const searchTerm = filters.search.toLowerCase();
+    // Search in supplier, description, expense_uid (case-insensitive via ilike)
+    // Tags search is handled client-side since Supabase array search is complex
     query = query.or(
       `supplier.ilike.%${filters.search}%,description.ilike.%${filters.search}%,expense_uid.ilike.%${filters.search}%`
     );
-    // Tags search is handled client-side since Supabase array search is complex
   }
 
-  const { data, error } = await query.order("expense_date", { ascending: false });
+  // OPTIMIZED: Limit results to improve initial load performance
+  // Most users don't need thousands of expenses - 500 most recent is usually enough
+  const { data, error } = await query
+    .order("expense_date", { ascending: false })
+    .limit(500);
 
   if (error) {
     console.error("Failed to fetch team expenses", error);
@@ -195,6 +210,74 @@ export async function getTeamExpenses(
   }
 
   return data || [];
+}
+
+// OPTIMIZED: Paginated version of getTeamExpenses for large datasets
+// Reduces payload by 90%+ when there are many expenses
+export async function getTeamExpensesPaginated(
+  teamId: string,
+  filters?: ExpenseFilters,
+  pagination?: PaginationOptions
+): Promise<PaginatedExpenses> {
+  const page = pagination?.page || 1;
+  const pageSize = pagination?.pageSize || 50;
+  const offset = (page - 1) * pageSize;
+
+  let query = supabase
+    .from("team_expenses")
+    .select(EXPENSE_LIST_FIELDS, { count: "exact" })
+    .eq("team_id", teamId)
+    .is("deleted_at", null);
+
+  // Apply filters
+  if (filters?.status) {
+    query = query.eq("status", filters.status);
+  }
+  if (filters?.categoryId) {
+    query = query.eq("category_id", filters.categoryId);
+  }
+  if (filters?.subcategoryId) {
+    query = query.eq("subcategory_id", filters.subcategoryId);
+  }
+  if (filters?.dateFrom) {
+    query = query.gte("expense_date", filters.dateFrom);
+  }
+  if (filters?.dateTo) {
+    query = query.lte("expense_date", filters.dateTo);
+  }
+  if (filters?.supplier) {
+    query = query.ilike("supplier", `%${filters.supplier}%`);
+  }
+  if (filters?.responsibleId) {
+    query = query.eq("responsible_id", filters.responsibleId);
+  }
+  if (filters?.tags && filters.tags.length > 0) {
+    query = query.overlaps("tags", filters.tags);
+  }
+  if (filters?.search) {
+    query = query.or(
+      `supplier.ilike.%${filters.search}%,description.ilike.%${filters.search}%,expense_uid.ilike.%${filters.search}%`
+    );
+  }
+
+  const { data, error, count } = await query
+    .order("expense_date", { ascending: false })
+    .range(offset, offset + pageSize - 1);
+
+  if (error) {
+    console.error("Failed to fetch team expenses", error);
+    throw new Error(error.message);
+  }
+
+  const total = count || 0;
+
+  return {
+    data: data || [],
+    total,
+    page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
+  };
 }
 
 // Get single expense by ID

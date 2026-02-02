@@ -529,31 +529,39 @@ export async function getPnlSummary(
 }
 
 // Manual P&L calculation (fallback)
+// OPTIMIZED: Run all 3 queries in parallel instead of sequentially
 async function calculatePnlManually(
   teamId: string,
   year: number
 ): Promise<PnlSummary[]> {
-  // Get expenses
-  const { data: expenses } = await supabase
-    .from("team_expenses")
-    .select("expense_date, amount, amount_without_vat, amount_with_vat, vat_deductible, status")
-    .eq("team_id", teamId)
-    .is("deleted_at", null)
-    .not("status", "in", '("draft","rejected")');
+  // Run all queries in parallel for better performance
+  const [expensesResult, revenuesResult, budgetsResult] = await Promise.all([
+    // Get expenses
+    supabase
+      .from("team_expenses")
+      .select("expense_date, amount, amount_without_vat, amount_with_vat, vat_deductible, status")
+      .eq("team_id", teamId)
+      .is("deleted_at", null)
+      .not("status", "in", '("draft","rejected")'),
 
-  // Get revenues
-  const { data: revenues } = await supabase
-    .from("team_revenues")
-    .select("month, amount")
-    .eq("team_id", teamId)
-    .eq("year", year);
+    // Get revenues
+    supabase
+      .from("team_revenues")
+      .select("month, amount")
+      .eq("team_id", teamId)
+      .eq("year", year),
 
-  // Get budgets
-  const { data: budgets } = await supabase
-    .from("team_budgets")
-    .select("jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec")
-    .eq("team_id", teamId)
-    .eq("year", year);
+    // Get budgets
+    supabase
+      .from("team_budgets")
+      .select("jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec")
+      .eq("team_id", teamId)
+      .eq("year", year),
+  ]);
+
+  const expenses = expensesResult.data;
+  const revenues = revenuesResult.data;
+  const budgets = budgetsResult.data;
 
   const result: PnlSummary[] = [];
 
@@ -617,28 +625,38 @@ export async function getExpensesByCategory(
 }
 
 // Manual category grouping (fallback)
+// OPTIMIZED: Run both queries in parallel instead of sequentially
 async function getExpensesByCategoryManual(
   teamId: string,
   year: number,
   month?: number
 ): Promise<CategoryExpense[]> {
-  let query = supabase
-    .from("team_expenses")
-    .select(`
-      id,
-      amount,
-      amount_without_vat,
-      amount_with_vat,
-      vat_deductible,
-      expense_date,
-      category_id,
-      subcategory_id
-    `)
-    .eq("team_id", teamId)
-    .is("deleted_at", null)
-    .not("status", "in", '("draft","rejected")');
+  // Run both queries in parallel for better performance
+  const [expensesResult, categoriesResult] = await Promise.all([
+    supabase
+      .from("team_expenses")
+      .select(`
+        id,
+        amount,
+        amount_without_vat,
+        amount_with_vat,
+        vat_deductible,
+        expense_date,
+        category_id,
+        subcategory_id
+      `)
+      .eq("team_id", teamId)
+      .is("deleted_at", null)
+      .not("status", "in", '("draft","rejected")'),
 
-  const { data: expenses } = await query;
+    supabase
+      .from("team_expense_categories")
+      .select("id, name, parent_id")
+      .eq("team_id", teamId),
+  ]);
+
+  const expenses = expensesResult.data;
+  const categories = categoriesResult.data;
 
   // Filter by year/month
   const filtered = expenses?.filter((e) => {
@@ -647,12 +665,6 @@ async function getExpensesByCategoryManual(
     if (month && d.getMonth() + 1 !== month) return false;
     return true;
   }) || [];
-
-  // Get categories
-  const { data: categories } = await supabase
-    .from("team_expense_categories")
-    .select("id, name, parent_id")
-    .eq("team_id", teamId);
 
   const catMap = new Map(categories?.map((c) => [c.id, c]) || []);
 

@@ -179,17 +179,29 @@ export async function getAttachmentUrl(filePath: string): Promise<string> {
 }
 
 // Get multiple signed URLs
+// OPTIMIZED: Fetch all URLs in parallel instead of sequentially
 export async function getAttachmentUrls(
   attachments: ExpenseAttachment[]
 ): Promise<Map<string, string>> {
   const urls = new Map<string, string>();
 
-  for (const attachment of attachments) {
-    try {
-      const url = await getAttachmentUrl(attachment.file_path);
-      urls.set(attachment.id, url);
-    } catch (err) {
-      console.error(`Failed to get URL for ${attachment.id}`, err);
+  // Fetch all URLs in parallel for better performance
+  const results = await Promise.all(
+    attachments.map(async (attachment) => {
+      try {
+        const url = await getAttachmentUrl(attachment.file_path);
+        return { id: attachment.id, url };
+      } catch (err) {
+        console.error(`Failed to get URL for ${attachment.id}`, err);
+        return { id: attachment.id, url: null };
+      }
+    })
+  );
+
+  // Build the map from results
+  for (const result of results) {
+    if (result.url) {
+      urls.set(result.id, result.url);
     }
   }
 

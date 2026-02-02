@@ -175,6 +175,7 @@ export async function syncBnrRates(): Promise<{ success: boolean; message: strin
 }
 
 // Calculate expense amounts in all currencies
+// OPTIMIZED: Fetch both exchange rates in parallel
 export async function calculateExpenseAmounts(
   amount: number,
   currency: "RON" | "EUR" | "USD",
@@ -187,8 +188,12 @@ export async function calculateExpenseAmounts(
   exchange_rate_usd: number;
 }> {
   const dateStr = typeof date === "string" ? date : date.toISOString().split("T")[0];
-  const eurRate = await getExchangeRate(dateStr, "EUR");
-  const usdRate = await getExchangeRate(dateStr, "USD");
+
+  // Fetch both rates in parallel for better performance
+  const [eurRate, usdRate] = await Promise.all([
+    getExchangeRate(dateStr, "EUR"),
+    getExchangeRate(dateStr, "USD"),
+  ]);
 
   let amountRon: number;
   let amountEur: number;

@@ -53,39 +53,52 @@ export async function getCompanies(): Promise<CompanyWithUsers[]> {
   const isSuper = await isSuperAdmin(currentUser.id);
   if (!isSuper) return [];
 
-  // Get companies
-  const { data: companies, error } = await supabase
-    .from("companies")
-    .select("*")
-    .order("created_at", { ascending: false });
+  // OPTIMIZED: Fetch all data in parallel with batch queries (fixes N+1 problem)
+  // Instead of 2 queries per company, we now run only 3 queries total
+  const [companiesResult, membershipsResult, whitelistResult] = await Promise.all([
+    // Get companies
+    supabase
+      .from("companies")
+      .select("*")
+      .order("created_at", { ascending: false }),
 
-  if (error || !companies) {
-    console.error("Error fetching companies:", error);
+    // Get ALL membership counts in one query (grouped by team_id)
+    supabase
+      .from("team_memberships")
+      .select("team_id"),
+
+    // Get ALL pending whitelist counts in one query
+    supabase
+      .from("user_whitelist")
+      .select("team_id")
+      .eq("status", "pending"),
+  ]);
+
+  if (companiesResult.error || !companiesResult.data) {
+    console.error("Error fetching companies:", companiesResult.error);
     return [];
   }
 
-  // Get user counts for each company from team_memberships
-  const companiesWithCounts: CompanyWithUsers[] = await Promise.all(
-    companies.map(async (company) => {
-      // Count from team_memberships
-      const { count: memberCount } = await supabase
-        .from("team_memberships")
-        .select("user_id", { count: "exact" })
-        .eq("team_id", company.team_id);
+  const companies = companiesResult.data;
+  const memberships = membershipsResult.data || [];
+  const whitelist = whitelistResult.data || [];
 
-      // Count pending invitations from user_whitelist
-      const { count: pendingCount } = await supabase
-        .from("user_whitelist")
-        .select("id", { count: "exact" })
-        .eq("team_id", company.team_id)
-        .eq("status", "pending");
+  // Build count maps for O(1) lookups
+  const memberCountMap = new Map<string, number>();
+  memberships.forEach(m => {
+    memberCountMap.set(m.team_id, (memberCountMap.get(m.team_id) || 0) + 1);
+  });
 
-      return {
-        ...company,
-        user_count: (memberCount || 0) + (pendingCount || 0)
-      };
-    })
-  );
+  const pendingCountMap = new Map<string, number>();
+  whitelist.forEach(w => {
+    pendingCountMap.set(w.team_id, (pendingCountMap.get(w.team_id) || 0) + 1);
+  });
+
+  // Build result with counts (no additional queries needed)
+  const companiesWithCounts: CompanyWithUsers[] = companies.map(company => ({
+    ...company,
+    user_count: (memberCountMap.get(company.team_id) || 0) + (pendingCountMap.get(company.team_id) || 0)
+  }));
 
   return companiesWithCounts;
 }
