@@ -220,8 +220,21 @@ export async function reactivateRecurringExpense(
   return data;
 }
 
-// Soft delete recurring expense
+// Soft delete recurring expense and all linked expenses
 export async function deleteRecurringExpense(id: string, teamId: string): Promise<void> {
+  // First, delete all linked expenses from team_expenses
+  const { error: expensesError } = await supabase
+    .from("team_expenses")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("recurring_expense_id", id)
+    .eq("team_id", teamId);
+
+  if (expensesError) {
+    console.error("[deleteRecurringExpense] Error deleting linked expenses:", expensesError);
+    throw new Error(expensesError.message);
+  }
+
+  // Then, soft delete the recurring expense template
   const { error } = await supabase
     .from("team_recurring_expenses")
     .update({ deleted_at: new Date().toISOString(), is_active: false })

@@ -2,16 +2,17 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { X, ChevronDown, Check } from 'lucide-react';
+import { X, ChevronDown, Check, Trash2 } from 'lucide-react';
 import { getCategoryTree, CategoryWithChildren } from '@/app/actions/categories';
-import { 
-  getRecurringExpense, 
-  updateRecurringExpense, 
+import {
+  getRecurringExpense,
+  updateRecurringExpense,
   RecurringExpense,
   deactivateRecurringExpense,
   reactivateRecurringExpense,
   getGeneratedExpenses,
-  updateRecurringPaymentStatus
+  updateRecurringPaymentStatus,
+  deleteRecurringExpense
 } from '@/app/actions/recurring-expenses';
 
 interface MonthPayment {
@@ -26,6 +27,8 @@ export default function RecurringExpenseDetailPage() {
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [recurringExpense, setRecurringExpense] = useState<RecurringExpense | null>(null);
   
   const [activeStatus, setActiveStatus] = useState<'activ' | 'inactiv'>('activ');
@@ -255,6 +258,22 @@ export default function RecurringExpenseDetailPage() {
       alert('Eroare la salvare. Încearcă din nou.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!params.id || !params.teamId) return;
+
+    setDeleting(true);
+    try {
+      await deleteRecurringExpense(params.id, params.teamId);
+      router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
+    } catch (error) {
+      console.error('Failed to delete recurring expense:', error);
+      alert('Eroare la ștergere. Încearcă din nou.');
+      setShowDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -782,18 +801,40 @@ export default function RecurringExpenseDetailPage() {
           </div>
         </div>
 
-        {/* Footer - Save Button */}
+        {/* Footer - Delete and Save Buttons */}
         <div style={{
           padding: '20px 28px 28px',
           display: 'flex',
-          justifyContent: 'center'
+          justifyContent: 'center',
+          gap: '16px'
         }}>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            disabled={saving || deleting}
+            style={{
+              padding: '14px 32px',
+              backgroundColor: 'white',
+              border: '1px solid rgba(239, 68, 68, 0.5)',
+              color: 'rgba(239, 68, 68, 1)',
+              fontSize: '15px',
+              fontWeight: 500,
+              borderRadius: '9999px',
+              cursor: saving || deleting ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              transition: 'all 0.2s'
+            }}
+          >
+            <Trash2 size={16} />
+            Șterge
+          </button>
           <button
             onClick={handleSave}
             disabled={saving}
             style={{
               padding: '14px 56px',
-              background: saving 
+              background: saving
                 ? 'rgba(156, 163, 175, 1)'
                 : 'linear-gradient(180deg, rgba(0, 212, 146, 1) 0%, rgba(81, 162, 255, 1) 100%)',
               color: 'white',
@@ -810,6 +851,101 @@ export default function RecurringExpenseDetailPage() {
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 200,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.3)',
+              backdropFilter: 'blur(4px)'
+            }}
+            onClick={() => !deleting && setShowDeleteConfirm(false)}
+          />
+
+          <div style={{
+            position: 'relative',
+            backgroundColor: 'white',
+            borderRadius: '16px',
+            boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            width: '100%',
+            maxWidth: '480px',
+            margin: '16px',
+            padding: '32px'
+          }}>
+            <h2 style={{
+              fontSize: '20px',
+              fontWeight: 600,
+              color: 'rgba(16, 24, 40, 1)',
+              marginBottom: '16px'
+            }}>
+              Confirmă ștergerea
+            </h2>
+
+            <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '8px' }}>
+              Ești sigur că vrei să ștergi această cheltuială recurentă?
+            </p>
+
+            <p style={{
+              color: 'rgba(239, 68, 68, 1)',
+              fontWeight: 500,
+              fontSize: '14px',
+              marginBottom: '24px',
+              backgroundColor: 'rgba(254, 242, 242, 1)',
+              padding: '12px 16px',
+              borderRadius: '8px'
+            }}>
+              Aceasta va șterge și toate înregistrările asociate din Cheltuieli.
+            </p>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+                style={{
+                  flex: 1,
+                  padding: '12px 24px',
+                  border: '1px solid rgba(229, 231, 235, 1)',
+                  borderRadius: '9999px',
+                  color: 'rgba(55, 65, 81, 1)',
+                  fontWeight: 500,
+                  backgroundColor: 'white',
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                  opacity: deleting ? 0.5 : 1
+                }}
+              >
+                Anulează
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                style={{
+                  flex: 1,
+                  padding: '12px 24px',
+                  backgroundColor: 'rgba(239, 68, 68, 1)',
+                  color: 'white',
+                  borderRadius: '9999px',
+                  fontWeight: 500,
+                  border: 'none',
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                  opacity: deleting ? 0.7 : 1
+                }}
+              >
+                {deleting ? 'Se șterge...' : 'Șterge definitiv'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
