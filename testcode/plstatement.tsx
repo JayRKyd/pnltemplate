@@ -1020,14 +1020,10 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                           </div>
                           
                           {getYearData(category.values).map((amount, index) => (
-                            <div 
-                              key={index} 
-                              className="py-3 text-center text-sm text-gray-900 font-medium cursor-pointer hover:text-[#0EA5E9]"
+                            <div
+                              key={index}
+                              className="py-3 text-center text-sm text-gray-900 font-medium"
                               style={getColumnStyle(index)}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (amount > 0) setShowInvoicesPopup({ category: category.name, month: getMonthLabels()[index], monthIndex: index });
-                              }}
                             >
                               {amount > 0 ? formatAmount(amount) : 0}
                             </div>

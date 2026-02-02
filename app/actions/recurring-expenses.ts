@@ -313,11 +313,12 @@ export async function getGeneratedExpenses(
   expense_date: string;
   amount: number;
   status: string;
+  payment_status: string | null;
   is_recurring_placeholder: boolean;
 }[]> {
   let query = supabase
     .from("team_expenses")
-    .select("id, expense_uid, expense_date, amount, status, is_recurring_placeholder")
+    .select("id, expense_uid, expense_date, amount, status, payment_status, is_recurring_placeholder")
     .eq("recurring_expense_id", recurringId)
     .eq("team_id", teamId)
     .is("deleted_at", null);

@@ -114,15 +114,15 @@ export default function RecurringExpenseDetailPage() {
           // Build payment map from database
           const expenseMap = new Map<number, boolean>();
           
-          // Build payment map using same logic as getRecurringExpensesWithPayments
+          // Build payment map using payment_status field (same as getRecurringExpensesWithPayments)
           generatedExpenses.forEach(exp => {
             const expDate = new Date(exp.expense_date);
             // Use getUTCMonth() to avoid timezone issues - dates are stored as UTC
             const month = expDate.getUTCMonth();
-            // Same logic as list view: paid if not placeholder OR status is 'paid'
-            // If multiple expenses exist for same month, mark as paid if ANY meet criteria
+            // Check payment_status field to determine if paid
+            // If multiple expenses exist for same month, mark as paid if ANY is paid
             const currentStatus = expenseMap.get(month);
-            const newStatus = !exp.is_recurring_placeholder || exp.status === 'paid';
+            const newStatus = exp.payment_status === 'paid';
             // Set to true if current is true OR new is true (OR logic)
             expenseMap.set(month, currentStatus || newStatus);
           });
