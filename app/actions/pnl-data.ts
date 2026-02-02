@@ -550,6 +550,26 @@ export async function getPnlDashboardData(
   // Initialize empty arrays for 24 months
   const emptyMonths = () => Array(24).fill(0);
 
+  // Try to use optimized RPC function first (much faster)
+  // Falls back to regular queries if RPC not available
+  let useRpcData = false;
+  let rpcData: { cheltuieli: number[]; venituri: number[]; categories: PnlCategory[] } | null = null;
+
+  try {
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('get_pnl_aggregated', {
+      p_team_id: teamId,
+      p_base_year: baseYear
+    });
+
+    if (!rpcError && rpcResult) {
+      rpcData = rpcResult;
+      useRpcData = true;
+      console.log('[getPnlDashboardData] Using optimized RPC function');
+    }
+  } catch (err) {
+    console.log('[getPnlDashboardData] RPC not available, using fallback queries');
+  }
+
   // OPTIMIZED: Single Promise.all for ALL data
   const [
     categoriesResult,
@@ -559,7 +579,7 @@ export async function getPnlDashboardData(
     expenseYearsResult,
     membershipResult,
   ] = await Promise.all([
-    // Categories
+    // Categories (always needed for structure)
     supabase
       .from("team_expense_categories")
       .select("id, name, parent_id, sort_order, category_type")
@@ -568,27 +588,31 @@ export async function getPnlDashboardData(
       .eq("category_type", "cheltuieli")
       .order("sort_order", { ascending: true }),
 
-    // Expenses for both years
-    supabase
-      .from("team_expenses")
-      .select(`
-        id, expense_date, accounting_period, supplier, description,
-        doc_number, amount, amount_with_vat, amount_without_vat,
-        vat_deductible, status, category_id, subcategory_id, is_recurring_placeholder
-      `)
-      .eq("team_id", teamId)
-      .is("deleted_at", null)
-      .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
-      .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`)
-      .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]),
+    // Expenses for both years - SKIP if using RPC (only fetch for popup details)
+    useRpcData
+      ? Promise.resolve({ data: [], error: null })
+      : supabase
+          .from("team_expenses")
+          .select(`
+            id, expense_date, accounting_period, supplier, description,
+            doc_number, amount, amount_with_vat, amount_without_vat,
+            vat_deductible, status, category_id, subcategory_id, is_recurring_placeholder
+          `)
+          .eq("team_id", teamId)
+          .is("deleted_at", null)
+          .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
+          .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`)
+          .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]),
 
-    // Revenues
-    supabase
-      .from("team_revenues")
-      .select("year, month, amount")
-      .eq("team_id", teamId)
-      .gte("year", prevYear)
-      .lte("year", baseYear),
+    // Revenues - SKIP if using RPC
+    useRpcData
+      ? Promise.resolve({ data: [], error: null })
+      : supabase
+          .from("team_revenues")
+          .select("year, month, amount")
+          .eq("team_id", teamId)
+          .gte("year", prevYear)
+          .lte("year", baseYear),
 
     // Budgets with category names
     supabase
@@ -601,12 +625,13 @@ export async function getPnlDashboardData(
       .eq("team_id", teamId)
       .eq("year", baseYear),
 
-    // Years from expenses (for available years)
+    // Years from expenses (for available years) - lightweight query
     supabase
       .from("team_expenses")
       .select("expense_date")
       .eq("team_id", teamId)
-      .is("deleted_at", null),
+      .is("deleted_at", null)
+      .limit(1000), // Limit for performance
 
     // User membership (for admin check)
     supabase
@@ -671,55 +696,76 @@ export async function getPnlDashboardData(
     return expense.amount_with_vat || expense.amount || 0;
   };
 
-  // Calculate totals
-  const cheltuieli = emptyMonths();
-  expensesData?.forEach(expense => {
-    const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
-    if (idx >= 0 && idx < 24) {
-      cheltuieli[idx] += getExpenseAmount(expense);
-    }
-  });
+  // Use RPC data if available, otherwise calculate from expenses
+  let cheltuieli: number[];
+  let categories: PnlCategory[];
+  let venituri: number[];
 
-  // Build categories with monthly values
-  const categories: PnlCategory[] = parentCategories.map((parent) => {
-    const catValues = emptyMonths();
-    const subcats = childCategories.filter(c => c.parent_id === parent.id);
-
-    const subcategories = subcats.map((sub) => {
-      const subValues = emptyMonths();
-      expensesData?.forEach(expense => {
-        if (expense.subcategory_id === sub.id) {
-          const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
-          if (idx >= 0 && idx < 24) {
-            const amount = getExpenseAmount(expense);
-            subValues[idx] += amount;
-            catValues[idx] += amount;
-          }
-        }
-      });
-      return { id: sub.id, name: sub.name, values: subValues };
+  if (useRpcData && rpcData) {
+    // Use pre-aggregated data from RPC (much faster)
+    cheltuieli = rpcData.cheltuieli || emptyMonths();
+    venituri = rpcData.venituri || emptyMonths();
+    categories = (rpcData.categories || []).map((cat: any) => ({
+      id: cat.id,
+      name: cat.name,
+      values: cat.values || emptyMonths(),
+      subcategories: (cat.subcategories || []).map((sub: any) => ({
+        id: sub.id,
+        name: sub.name,
+        values: sub.values || emptyMonths(),
+      })),
+    }));
+  } else {
+    // Fallback: Calculate totals from raw expenses
+    cheltuieli = emptyMonths();
+    expensesData?.forEach(expense => {
+      const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
+      if (idx >= 0 && idx < 24) {
+        cheltuieli[idx] += getExpenseAmount(expense);
+      }
     });
 
-    if (subcats.length === 0) {
-      expensesData?.forEach(expense => {
-        if (expense.category_id === parent.id) {
-          const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
-          if (idx >= 0 && idx < 24) {
-            catValues[idx] += getExpenseAmount(expense);
+    // Build categories with monthly values
+    categories = parentCategories.map((parent) => {
+      const catValues = emptyMonths();
+      const subcats = childCategories.filter(c => c.parent_id === parent.id);
+
+      const subcategories = subcats.map((sub) => {
+        const subValues = emptyMonths();
+        expensesData?.forEach(expense => {
+          if (expense.subcategory_id === sub.id) {
+            const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
+            if (idx >= 0 && idx < 24) {
+              const amount = getExpenseAmount(expense);
+              subValues[idx] += amount;
+              catValues[idx] += amount;
+            }
           }
-        }
+        });
+        return { id: sub.id, name: sub.name, values: subValues };
       });
-    }
 
-    return { id: parent.id, name: parent.name, values: catValues, subcategories };
-  });
+      if (subcats.length === 0) {
+        expensesData?.forEach(expense => {
+          if (expense.category_id === parent.id) {
+            const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
+            if (idx >= 0 && idx < 24) {
+              catValues[idx] += getExpenseAmount(expense);
+            }
+          }
+        });
+      }
 
-  // Revenue per month
-  const venituri = emptyMonths();
-  revenuesData?.forEach(rev => {
-    const idx = rev.year === prevYear ? rev.month - 1 : rev.month - 1 + 12;
-    if (idx >= 0 && idx < 24) venituri[idx] += rev.amount || 0;
-  });
+      return { id: parent.id, name: parent.name, values: catValues, subcategories };
+    });
+
+    // Revenue per month (fallback)
+    venituri = emptyMonths();
+    revenuesData?.forEach(rev => {
+      const idx = rev.year === prevYear ? rev.month - 1 : rev.month - 1 + 12;
+      if (idx >= 0 && idx < 24) venituri[idx] += rev.amount || 0;
+    });
+  }
 
   // Budget per month
   const budget = emptyMonths();
