@@ -217,6 +217,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   const [searchingSupplier, setSearchingSupplier] = useState(false);
   const [supplierSearchError, setSupplierSearchError] = useState(false);
   const supplierSearchTimeout = useRef<NodeJS.Timeout | null>(null);
+  const supplierSelectedRef = useRef(false); // Track if a selection was made (avoids stale closure in blur)
 
   // Tags autocomplete
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
@@ -369,6 +370,9 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         setFurnizor(expense.supplier || "");
         setFurnizorCui(expense.supplier_cui || "");
         setFurnizorLocked(!!expense.supplier);
+        if (expense.supplier) {
+          supplierSelectedRef.current = true; // Mark as selected when loading existing
+        }
         setDocType(expense.doc_type ? expense.doc_type.charAt(0).toUpperCase() + expense.doc_type.slice(1) : "Factura");
         setNrDoc(expense.doc_number || "");
         setSelectedDate(new Date(expense.expense_date));
@@ -468,6 +472,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   }, [teamId]);
 
   const handleSupplierSelect = useCallback((supplier: SupplierSearchResult) => {
+    supplierSelectedRef.current = true; // Mark that selection was made
     setFurnizor(supplier.name);
     setFurnizorCui(supplier.cui || "");
     setFurnizorLocked(true);
@@ -476,6 +481,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   }, []);
 
   const handleSupplierUnlock = useCallback(() => {
+    supplierSelectedRef.current = false; // Reset ref when unlocking
     setFurnizorLocked(false);
     setFurnizorCui("");
   }, []);
@@ -737,15 +743,19 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   const handleSupplierBlur = useCallback(() => {
     // Small delay to allow click on dropdown item to register first
     setTimeout(() => {
-      if (!furnizorLocked && furnizor.trim()) {
-        // User typed something but didn't select - clear it
-        setFurnizor("");
-        setFurnizorCui("");
-        setShowSupplierDropdown(false);
-        setSupplierSearchResults([]);
+      // Check the ref instead of stale closure state
+      if (supplierSelectedRef.current) {
+        // Selection was made, don't clear - reset the ref for next time
+        supplierSelectedRef.current = false;
+        return;
       }
+      // No selection was made, clear the input
+      setFurnizor("");
+      setFurnizorCui("");
+      setShowSupplierDropdown(false);
+      setSupplierSearchResults([]);
     }, 200);
-  }, [furnizorLocked, furnizor]);
+  }, []);
 
   // Track if save is in progress to prevent double-clicks
   const [saveInProgress, setSaveInProgress] = useState(false);

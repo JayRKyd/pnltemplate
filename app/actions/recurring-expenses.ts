@@ -486,17 +486,15 @@ export async function updateRecurringPaymentStatus(
   }
 
   if (existingExpense) {
-    // Update status and payment_status
-    // When marking as paid: status becomes 'approved' (Final), payment_status becomes 'paid'
-    // When unmarking: status becomes 'placeholder' (Recurent), payment_status becomes 'unpaid'
-    const newStatus = paid ? 'approved' : 'placeholder';
+    // Update only payment_status - keep status as 'recurent' always
+    // Recurring expenses always show pink "Recurent" badge regardless of payment status
     const newPaymentStatus = paid ? 'paid' : 'unpaid';
     const { error: updateError } = await supabase
       .from("team_expenses")
-      .update({ 
-        status: newStatus,
+      .update({
+        status: 'recurent', // Always keep as recurent
         payment_status: newPaymentStatus,
-        is_recurring_placeholder: !paid // If unpaid, it's a placeholder again
+        is_recurring_placeholder: true // Always true for recurring expenses
       })
       .eq("id", existingExpense.id);
 
@@ -536,9 +534,9 @@ export async function updateRecurringPaymentStatus(
         doc_type: recurring.doc_type,
         tags: recurring.tags,
         vat_deductible: recurring.vat_deductible,
-        status: 'approved', // Final status when marked as paid
+        status: 'recurent', // Always recurent for recurring expenses
         payment_status: 'paid',
-        is_recurring_placeholder: false
+        is_recurring_placeholder: true // Always true for recurring expenses
       });
 
     if (insertError) {

@@ -125,9 +125,17 @@ UPDATE team_expenses
 SET status = 'recurent'
 WHERE status = 'placeholder'
   AND recurring_expense_id IS NOT NULL
-  AND is_recurring_placeholder = true
   AND deleted_at IS NULL;
 
--- 4. Update comment to reflect valid statuses
+-- 4. Fix recurring expenses that were incorrectly set to 'approved' when marked as paid
+-- They should always be 'recurent' regardless of payment status
+UPDATE team_expenses
+SET status = 'recurent',
+    is_recurring_placeholder = true
+WHERE recurring_expense_id IS NOT NULL
+  AND status = 'approved'
+  AND deleted_at IS NULL;
+
+-- 5. Update comment to reflect valid statuses
 COMMENT ON COLUMN team_expenses.status IS
 'Valid values: draft, recurent, pending, approved, rejected, paid, final';
