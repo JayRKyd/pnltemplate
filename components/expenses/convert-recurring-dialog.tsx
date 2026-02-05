@@ -16,6 +16,21 @@ interface ConvertRecurringDialogProps {
   onSuccess: (expense: TeamExpense) => void;
 }
 
+// Helper to convert File to base64
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Remove data URL prefix to get pure base64
+      const base64 = result.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 // Romanian number formatting
 function formatAmount(value: string | number): string {
   if (typeof value === "number") {
@@ -153,7 +168,15 @@ export function ConvertRecurringDialog({
       // 3. Upload attachments
       if (result.expense && files.length > 0) {
         await Promise.all(
-          files.map(file => uploadAttachment(result.expense!.id, teamId, file))
+          files.map(async (file) => {
+            const base64 = await fileToBase64(file);
+            return uploadAttachment(result.expense!.id, teamId, {
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              base64,
+            });
+          })
         );
       }
 
