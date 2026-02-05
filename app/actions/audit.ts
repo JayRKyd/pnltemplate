@@ -169,7 +169,7 @@ export async function getRecentAuditActivity(teamId: string): Promise<AuditLogEn
 /**
  * Get available audit action types (for filters)
  */
-export function getAuditActionTypes(): { value: string; label: string }[] {
+export async function getAuditActionTypes(): Promise<{ value: string; label: string }[]> {
   return [
     { value: "company.created", label: "Company Created" },
     { value: "company.updated", label: "Company Updated" },
@@ -189,7 +189,7 @@ export function getAuditActionTypes(): { value: string; label: string }[] {
 /**
  * Get available entity types (for filters)
  */
-export function getAuditEntityTypes(): { value: string; label: string }[] {
+export async function getAuditEntityTypes(): Promise<{ value: string; label: string }[]> {
   return [
     { value: "company", label: "Company" },
     { value: "user", label: "User" },
