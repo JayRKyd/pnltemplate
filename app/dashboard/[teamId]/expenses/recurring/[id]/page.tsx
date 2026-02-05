@@ -10,16 +10,11 @@ import {
   RecurringExpense,
   deactivateRecurringExpense,
   reactivateRecurringExpense,
-  getGeneratedExpenses,
-  updateRecurringPaymentStatus,
   deleteRecurringExpense
 } from '@/app/actions/recurring-expenses';
-
-interface MonthPayment {
-  month: string;
-  year: number;
-  paid: boolean;
-}
+import { RecurringInstance, getRecurringInstances } from '@/app/actions/recurring-instances';
+import { ConvertRecurringDialog } from '@/components/expenses/convert-recurring-dialog';
+import { useUser } from '@stackframe/stack';
 
 export default function RecurringExpenseDetailPage() {
   const params = useParams<{ teamId: string; id: string }>();
@@ -30,7 +25,7 @@ export default function RecurringExpenseDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [recurringExpense, setRecurringExpense] = useState<RecurringExpense | null>(null);
-  
+
   const [activeStatus, setActiveStatus] = useState<'activ' | 'inactiv'>('activ');
   const [numeFurnizor, setNumeFurnizor] = useState('');
   const [cuiFurnizor, setCuiFurnizor] = useState('');
@@ -42,52 +37,36 @@ export default function RecurringExpenseDetailPage() {
   const [sumaCuTVA, setSumaCuTVA] = useState('');
   const [sumaFaraTVA, setSumaFaraTVA] = useState('');
   const [tva, setTva] = useState('');
-  
+
   const [categories, setCategories] = useState<CategoryWithChildren[]>([]);
   const [showContDropdown, setShowContDropdown] = useState(false);
   const [showSubcontDropdown, setShowSubcontDropdown] = useState(false);
-  
-  // Monthly payments state - 12 months
-  const [monthlyPayments, setMonthlyPayments] = useState<MonthPayment[]>([]);
-  const [updatingPayment, setUpdatingPayment] = useState<number | null>(null);
 
-  // Generate months for current year (same as list view shows Jul-Dec)
-  // Show all 12 months of current year for consistency
-  useEffect(() => {
-    const months: MonthPayment[] = [];
-    const currentYear = new Date().getFullYear();
-    const romanianMonths = [
-      'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
-      'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
-    ];
-    
-    // Show all 12 months of the current year (Jan-Dec)
-    for (let i = 0; i < 12; i++) {
-      months.push({
-        month: romanianMonths[i],
-        year: currentYear,
-        paid: false // Default to unpaid, will be loaded from DB
-      });
-    }
-    setMonthlyPayments(months);
-  }, []);
+  // Recurring instances state
+  const [instances, setInstances] = useState<RecurringInstance[]>([]);
+  const [showConvertDialog, setShowConvertDialog] = useState(false);
+  const [selectedInstance, setSelectedInstance] = useState<RecurringInstance | null>(null);
 
-  // Load recurring expense data and payment status
+  // Get user from hook
+  const user = useUser();
+
+  // Load recurring expense data and instances
   useEffect(() => {
     async function loadData() {
       if (!params.id || !params.teamId) return;
-      
+
       setLoading(true);
       try {
         const currentYear = new Date().getFullYear();
-        const [expense, cats, generatedExpenses] = await Promise.all([
+        const [expense, cats, loadedInstances] = await Promise.all([
           getRecurringExpense(params.id),
           getCategoryTree(params.teamId),
-          getGeneratedExpenses(params.id, params.teamId, currentYear)
+          getRecurringInstances(params.id, params.teamId, currentYear)
         ]);
-        
+
         setCategories(cats);
-        
+        setInstances(loadedInstances);
+
         if (expense) {
           setRecurringExpense(expense);
           setActiveStatus(expense.is_active ? 'activ' : 'inactiv');
@@ -98,7 +77,7 @@ export default function RecurringExpenseDetailPage() {
           setCont(expense.category_id || '');
           setSubcont(expense.subcategory_id || '');
           setTvaDeductibil(expense.vat_deductible ? 'Da' : 'Nu');
-          
+
           if (expense.amount_with_vat) {
             setSumaCuTVA(formatAmount(expense.amount_with_vat));
           }
@@ -109,38 +88,6 @@ export default function RecurringExpenseDetailPage() {
             const vatAmount = expense.amount_with_vat - expense.amount_without_vat;
             setTva(formatAmount(vatAmount));
           }
-
-          // Load actual payment status for each month using same logic as list view
-          // Build payment map from database
-          const expenseMap = new Map<number, boolean>();
-          
-          // Build payment map using payment_status field (same as getRecurringExpensesWithPayments)
-          generatedExpenses.forEach(exp => {
-            const expDate = new Date(exp.expense_date);
-            // Use getUTCMonth() to avoid timezone issues - dates are stored as UTC
-            const month = expDate.getUTCMonth();
-            // Check payment_status field to determine if paid
-            // If multiple expenses exist for same month, mark as paid if ANY is paid
-            const currentStatus = expenseMap.get(month);
-            const newStatus = exp.payment_status === 'paid';
-            // Set to true if current is true OR new is true (OR logic)
-            expenseMap.set(month, currentStatus || newStatus);
-          });
-
-          // Generate all 12 months with payment status from DB
-          // This avoids race condition with the initialization useEffect
-          const romanianMonths = [
-            'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
-            'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
-          ];
-          
-          const updatedPayments: MonthPayment[] = romanianMonths.map((month, index) => ({
-            month,
-            year: currentYear,
-            paid: expenseMap.get(index) || false
-          }));
-          
-          setMonthlyPayments(updatedPayments);
         }
       } catch (error) {
         console.error('Failed to load recurring expense:', error);
@@ -148,18 +95,9 @@ export default function RecurringExpenseDetailPage() {
         setLoading(false);
       }
     }
-    
+
     loadData();
   }, [params.id, params.teamId]);
-
-  // Helper to get month index from Romanian name
-  const getMonthIndex = (monthName: string): number => {
-    const romanianMonths = [
-      'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
-      'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
-    ];
-    return romanianMonths.indexOf(monthName);
-  };
 
   const formatAmount = (amount: number): string => {
     return amount.toLocaleString('ro-RO', {
@@ -171,6 +109,23 @@ export default function RecurringExpenseDetailPage() {
   const parseAmount = (value: string): number => {
     const cleaned = value.replace(/\./g, '').replace(',', '.');
     return parseFloat(cleaned) || 0;
+  };
+
+  // Open convert dialog for an instance
+  const handleOpenConvert = (instance: RecurringInstance) => {
+    setSelectedInstance(instance);
+    setShowConvertDialog(true);
+  };
+
+  // Reload instances after successful convert
+  const handleConvertSuccess = async () => {
+    setShowConvertDialog(false);
+    setSelectedInstance(null);
+
+    // Reload instances
+    const currentYear = new Date().getFullYear();
+    const loadedInstances = await getRecurringInstances(params.id, params.teamId, currentYear);
+    setInstances(loadedInstances);
   };
 
   // Get subcategories for selected category
@@ -194,38 +149,6 @@ export default function RecurringExpenseDetailPage() {
     router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
   };
 
-  const toggleMonthPayment = async (index: number) => {
-    if (!params.id || !params.teamId || updatingPayment === index) return;
-    
-    const mp = monthlyPayments[index];
-    const newPaidStatus = !mp.paid;
-    
-    // Optimistically update UI
-    setMonthlyPayments(prev => prev.map((m, i) => 
-      i === index ? { ...m, paid: newPaidStatus } : m
-    ));
-    setUpdatingPayment(index);
-
-    try {
-      const monthIndex = getMonthIndex(mp.month);
-      await updateRecurringPaymentStatus(
-        params.id,
-        params.teamId,
-        mp.year,
-        monthIndex,
-        newPaidStatus
-      );
-    } catch (error) {
-      console.error('Failed to update payment status:', error);
-      // Revert on error
-      setMonthlyPayments(prev => prev.map((m, i) => 
-        i === index ? { ...m, paid: !newPaidStatus } : m
-      ));
-      alert('Eroare la actualizarea statusului de plată. Încearcă din nou.');
-    } finally {
-      setUpdatingPayment(null);
-    }
-  };
 
   const handleSave = async () => {
     if (!recurringExpense) return;
@@ -738,66 +661,97 @@ export default function RecurringExpenseDetailPage() {
             </div>
           </div>
 
-          {/* Right Column - Monthly Payments */}
-          <div style={{ 
-            width: '240px', 
+          {/* Right Column - Instance Status Grid */}
+          <div style={{
+            width: '240px',
             borderLeft: '1px solid rgba(229, 231, 235, 0.5)',
             paddingLeft: '28px',
             display: 'flex',
             flexDirection: 'column',
             gap: '8px'
           }}>
-            {monthlyPayments.map((mp, index) => {
-              const isUpdating = updatingPayment === index;
-              return (
-                <div 
-                  key={`${mp.month}-${mp.year}`}
-                  onClick={() => !isUpdating && toggleMonthPayment(index)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '10px 0',
-                    cursor: isUpdating ? 'wait' : 'pointer',
-                    opacity: isUpdating ? 0.6 : 1,
-                    borderBottom: index < monthlyPayments.length - 1 ? '1px solid rgba(243, 244, 246, 1)' : 'none'
-                  }}
-                >
-                  <span style={{ 
-                    fontSize: '14px', 
-                    color: 'rgba(55, 65, 81, 1)',
-                    fontWeight: 400
-                  }}>
-                    {mp.month} {mp.year}
-                  </span>
-                  {mp.paid ? (
-                    <div style={{
-                      width: '26px',
-                      height: '26px',
-                      borderRadius: '50%',
-                      backgroundColor: 'rgba(209, 250, 229, 1)',
+            {(() => {
+              const currentYear = new Date().getFullYear();
+              const romanianMonths = [
+                'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
+                'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
+              ];
+
+              return romanianMonths.map((monthName, monthIndex) => {
+                const instance = instances.find(i => i.instance_month === monthIndex + 1);
+                const isClosed = instance?.status === 'closed';
+                const isOpen = instance?.status === 'open';
+
+                return (
+                  <div
+                    key={`${monthName}-${currentYear}`}
+                    onClick={() => instance && isOpen && handleOpenConvert(instance)}
+                    style={{
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'center'
+                      justifyContent: 'space-between',
+                      padding: '10px 0',
+                      cursor: isOpen ? 'pointer' : 'default',
+                      borderBottom: monthIndex < 11 ? '1px solid rgba(243, 244, 246, 1)' : 'none',
+                      transition: 'background-color 0.2s',
+                      backgroundColor: isOpen ? 'rgba(255, 255, 255, 0)' : 'transparent',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (isOpen) e.currentTarget.style.backgroundColor = 'rgba(240, 253, 250, 0.5)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <span style={{
+                      fontSize: '14px',
+                      color: 'rgba(55, 65, 81, 1)',
+                      fontWeight: 400
                     }}>
-                      <Check size={14} style={{ color: 'rgba(5, 150, 105, 1)' }} />
-                    </div>
-                  ) : (
-                    <div style={{
-                      width: '26px',
-                      height: '26px',
-                      borderRadius: '50%',
-                      backgroundColor: 'rgba(254, 226, 226, 1)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
-                      <X size={14} style={{ color: 'rgba(220, 38, 38, 1)' }} />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                      {monthName} {currentYear}
+                    </span>
+
+                    {isClosed && (
+                      <div style={{
+                        width: '26px',
+                        height: '26px',
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(209, 250, 229, 1)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <Check size={14} style={{ color: 'rgba(5, 150, 105, 1)' }} />
+                      </div>
+                    )}
+
+                    {isOpen && (
+                      <div style={{
+                        width: '26px',
+                        height: '26px',
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(254, 226, 226, 1)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <X size={14} style={{ color: 'rgba(220, 38, 38, 1)' }} />
+                      </div>
+                    )}
+
+                    {!instance && (
+                      <div style={{
+                        width: '26px',
+                        height: '26px',
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(243, 244, 246, 1)',
+                        border: '1px dashed rgba(209, 213, 220, 1)'
+                      }} />
+                    )}
+                  </div>
+                );
+              });
+            })()}
           </div>
         </div>
 
@@ -945,6 +899,21 @@ export default function RecurringExpenseDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Convert Recurring Dialog */}
+      {showConvertDialog && selectedInstance && user && (
+        <ConvertRecurringDialog
+          isOpen={showConvertDialog}
+          onClose={() => {
+            setShowConvertDialog(false);
+            setSelectedInstance(null);
+          }}
+          instance={selectedInstance}
+          teamId={params.teamId}
+          userId={user.id}
+          onSuccess={handleConvertSuccess}
+        />
       )}
     </div>
   );

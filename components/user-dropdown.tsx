@@ -62,7 +62,7 @@ export function UserDropdown({ colorModeToggle, teamId }: UserDropdownProps) {
   };
 
   const handleCompanii = () => {
-    router.push('/companies');
+    router.push('/super-admin/dashboard');
     setIsOpen(false);
   };
 

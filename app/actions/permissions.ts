@@ -328,3 +328,27 @@ export async function getAvailableRoles(): Promise<{ value: UserRole; label: str
     { value: "accounting_viewer", label: "Accounting Viewer", description: "View-only, can download attachments" },
   ];
 }
+
+// Check if user is a Company Admin (admin role in their team)
+export async function isCompanyAdmin(teamId: string): Promise<boolean> {
+  const role = await getUserRole(teamId);
+  return role === "admin";
+}
+
+// Check if user can manage company settings
+export async function canManageCompanySettings(teamId: string): Promise<boolean> {
+  const permissions = await getUserPermissions(teamId);
+  return permissions.canManageTeam; // Admin role has this permission
+}
+
+// Check if user can manage team members (invite, remove, change roles)
+export async function canManageUsers(teamId: string): Promise<boolean> {
+  const permissions = await getUserPermissions(teamId);
+  return permissions.canManageTeam; // Admin role has this permission
+}
+
+// Check if user can view company dashboard
+export async function canViewCompanyDashboard(teamId: string): Promise<boolean> {
+  // Only admins can view company dashboard
+  return await isCompanyAdmin(teamId);
+}

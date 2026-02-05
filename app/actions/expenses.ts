@@ -66,6 +66,7 @@ export interface ExpenseInput {
   accountingPeriod?: string;
   status?: string;
   expenseDate?: string;
+  recurringInstanceId?: string; // Link to recurring instance when converting
 }
 
 export interface ExpenseLineInput {
@@ -350,6 +351,7 @@ export async function createExpense(input: ExpenseInput): Promise<TeamExpense> {
       accounting_period: input.accountingPeriod ?? null,
       status: input.status ?? "draft",
       expense_date: input.expenseDate ?? new Date().toISOString().split("T")[0],
+      recurring_instance_id: input.recurringInstanceId ?? null,
     })
     .select()
     .single();
@@ -510,6 +512,18 @@ export async function deleteExpense(expenseId: string, teamId: string): Promise<
   }
 
   await logExpenseAudit(expenseId, teamId, user.id, "deleted", current, null);
+
+  // FR-7: If this expense was linked to a recurring instance, reopen the instance
+  if (current?.recurring_instance_id) {
+    try {
+      const { reopenInstance } = await import("./recurring-instances");
+      await reopenInstance(current.recurring_instance_id, teamId);
+      console.log(`[deleteExpense] Reopened instance ${current.recurring_instance_id}`);
+    } catch (error) {
+      console.error("[deleteExpense] Failed to reopen instance:", error);
+      // Non-fatal, log and continue
+    }
+  }
 }
 
 // === WORKFLOW ACTIONS ===

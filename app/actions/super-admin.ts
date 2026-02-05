@@ -170,3 +170,171 @@ export async function getSuperAdminByEmail(email: string): Promise<SuperAdmin | 
   if (error || !data) return null;
   return data;
 }
+
+/**
+ * Platform Analytics for Super Admin Dashboard
+ */
+export interface PlatformAnalytics {
+  totalCompanies: number;
+  activeCompanies: number;
+  pendingCompanies: number;
+  suspendedCompanies: number;
+  totalUsers: number;
+  totalExpenses: number;
+  totalExpensesAmount: number;
+  recentCompanies: Array<{
+    id: string;
+    name: string;
+    status: string;
+    created_at: string;
+  }>;
+}
+
+/**
+ * Get platform-wide analytics (Super Admin only)
+ */
+export async function getPlatformAnalytics(): Promise<PlatformAnalytics | null> {
+  const currentUser = await stackServerApp.getUser();
+  if (!currentUser) return null;
+
+  const isSuper = await isSuperAdmin(currentUser.id);
+  if (!isSuper) return null;
+
+  // Run all queries in parallel
+  const [
+    companiesResult,
+    membershipsResult,
+    expensesResult,
+  ] = await Promise.all([
+    // All companies
+    supabase
+      .from("companies")
+      .select("id, name, status, created_at"),
+
+    // All team memberships
+    supabase
+      .from("team_memberships")
+      .select("user_id"),
+
+    // All expenses (current year)
+    supabase
+      .from("team_expenses")
+      .select("amount, amount_with_vat, vat_deductible")
+      .gte("expense_date", `${new Date().getFullYear()}-01-01`)
+      .is("deleted_at", null),
+  ]);
+
+  const companies = companiesResult.data || [];
+  const memberships = membershipsResult.data || [];
+  const expenses = expensesResult.data || [];
+
+  // Count companies by status
+  const activeCompanies = companies.filter(c => c.status === "active").length;
+  const pendingCompanies = companies.filter(c => c.status === "pending").length;
+  const suspendedCompanies = companies.filter(c => c.status === "suspended").length;
+
+  // Calculate total expenses amount
+  const totalExpensesAmount = expenses.reduce((sum, exp) => {
+    const amount = exp.vat_deductible ? exp.amount : (exp.amount_with_vat || exp.amount);
+    return sum + (amount || 0);
+  }, 0);
+
+  // Get recent companies (last 5)
+  const recentCompanies = companies
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 5)
+    .map(c => ({
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      created_at: c.created_at,
+    }));
+
+  return {
+    totalCompanies: companies.length,
+    activeCompanies,
+    pendingCompanies,
+    suspendedCompanies,
+    totalUsers: memberships.length,
+    totalExpenses: expenses.length,
+    totalExpensesAmount,
+    recentCompanies,
+  };
+}
+
+/**
+ * Get all companies with detailed stats (Super Admin only)
+ */
+export interface CompanyWithDetailedStats {
+  id: string;
+  team_id: string;
+  name: string;
+  admin_email: string;
+  status: string;
+  created_at: string;
+  user_count: number;
+  total_expenses: number;
+  total_amount: number;
+}
+
+export async function getAllCompaniesWithStats(): Promise<CompanyWithDetailedStats[]> {
+  const currentUser = await stackServerApp.getUser();
+  if (!currentUser) return [];
+
+  const isSuper = await isSuperAdmin(currentUser.id);
+  if (!isSuper) return [];
+
+  // Get all companies
+  const { data: companies, error: companiesError } = await supabase
+    .from("companies")
+    .select("id, team_id, name, admin_email, status, created_at")
+    .order("created_at", { ascending: false });
+
+  if (companiesError || !companies) {
+    console.error("Error fetching companies:", companiesError);
+    return [];
+  }
+
+  // Get memberships count for each team
+  const { data: memberships } = await supabase
+    .from("team_memberships")
+    .select("team_id");
+
+  // Get expenses for each team (current year)
+  const { data: expenses } = await supabase
+    .from("team_expenses")
+    .select("team_id, amount, amount_with_vat, vat_deductible")
+    .gte("expense_date", `${new Date().getFullYear()}-01-01`)
+    .is("deleted_at", null);
+
+  // Build count maps
+  const memberCountMap = new Map<string, number>();
+  (memberships || []).forEach(m => {
+    memberCountMap.set(m.team_id, (memberCountMap.get(m.team_id) || 0) + 1);
+  });
+
+  const expenseStatsMap = new Map<string, { count: number; total: number }>();
+  (expenses || []).forEach(exp => {
+    const stats = expenseStatsMap.get(exp.team_id) || { count: 0, total: 0 };
+    const amount = exp.vat_deductible ? exp.amount : (exp.amount_with_vat || exp.amount);
+    stats.count++;
+    stats.total += amount || 0;
+    expenseStatsMap.set(exp.team_id, stats);
+  });
+
+  // Combine data
+  return companies.map(company => {
+    const expenseStats = expenseStatsMap.get(company.team_id) || { count: 0, total: 0 };
+    return {
+      id: company.id,
+      team_id: company.team_id,
+      name: company.name,
+      admin_email: company.admin_email,
+      status: company.status,
+      created_at: company.created_at,
+      user_count: memberCountMap.get(company.team_id) || 0,
+      total_expenses: expenseStats.count,
+      total_amount: expenseStats.total,
+    };
+  });
+}

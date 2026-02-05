@@ -25,6 +25,11 @@ export interface RecurringExpense {
   end_date: string | null;
   is_active: boolean;
   last_generated_date: string | null;
+  // Versioning fields
+  version?: number;
+  previous_version_id?: string | null;
+  superseded_at?: string | null;
+  superseded_by_id?: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -299,6 +304,117 @@ export async function findMatchingRecurring(
   }
 
   return data;
+}
+
+// Update template with versioning (FR-8)
+// Deactivates old template and creates a new version
+// Past instances remain unchanged (they have snapshot values)
+export async function updateRecurringTemplateVersioned(
+  id: string,
+  teamId: string,
+  updates: Partial<RecurringExpenseInput>
+): Promise<RecurringExpense> {
+  const user = await stackServerApp.getUser();
+  if (!user) {
+    throw new Error("No user in session");
+  }
+
+  // 1. Get current template
+  const currentTemplate = await getRecurringExpense(id);
+  if (!currentTemplate) {
+    throw new Error("Template not found");
+  }
+
+  // 2. Mark current template as superseded
+  const now = new Date().toISOString();
+  const { error: supersededError } = await supabase
+    .from("team_recurring_expenses")
+    .update({
+      superseded_at: now,
+      is_active: false,
+    })
+    .eq("id", id)
+    .eq("team_id", teamId);
+
+  if (supersededError) {
+    console.error("[updateRecurringTemplateVersioned] Error superseding:", supersededError);
+    throw new Error(supersededError.message);
+  }
+
+  // 3. Create new template with updates
+  const { data: newTemplate, error: createError } = await supabase
+    .from("team_recurring_expenses")
+    .insert({
+      team_id: teamId,
+      user_id: user.id,
+      // Copy all fields from old template
+      amount: updates.amount ?? currentTemplate.amount,
+      amount_without_vat: updates.amountWithoutVat ?? currentTemplate.amount_without_vat,
+      amount_with_vat: updates.amountWithVat ?? currentTemplate.amount_with_vat,
+      vat_rate: updates.vatRate ?? currentTemplate.vat_rate,
+      vat_deductible: updates.vatDeductible ?? currentTemplate.vat_deductible,
+      currency: updates.currency ?? currentTemplate.currency,
+      category_id: updates.categoryId ?? currentTemplate.category_id,
+      subcategory_id: updates.subcategoryId ?? currentTemplate.subcategory_id,
+      supplier: updates.supplier ?? currentTemplate.supplier,
+      description: updates.description ?? currentTemplate.description,
+      doc_type: updates.docType ?? currentTemplate.doc_type,
+      tags: updates.tags ?? currentTemplate.tags,
+      recurrence_type: updates.recurrenceType ?? currentTemplate.recurrence_type,
+      day_of_month: updates.dayOfMonth ?? currentTemplate.day_of_month,
+      start_date: updates.startDate ?? currentTemplate.start_date,
+      end_date: updates.endDate ?? currentTemplate.end_date,
+      // Versioning fields
+      version: (currentTemplate.version || 1) + 1,
+      previous_version_id: currentTemplate.id,
+      is_active: true,
+    })
+    .select()
+    .single();
+
+  if (createError) {
+    console.error("[updateRecurringTemplateVersioned] Error creating new version:", createError);
+    throw new Error(createError.message);
+  }
+
+  // 4. Update old template with superseded_by_id
+  const { error: linkError } = await supabase
+    .from("team_recurring_expenses")
+    .update({ superseded_by_id: newTemplate.id })
+    .eq("id", id);
+
+  if (linkError) {
+    console.error("[updateRecurringTemplateVersioned] Error linking versions:", linkError);
+    // Non-fatal, continue
+  }
+
+  return newTemplate;
+}
+
+// Get version history for a template
+export async function getTemplateVersionHistory(
+  templateId: string,
+  teamId: string
+): Promise<RecurringExpense[]> {
+  const versions: RecurringExpense[] = [];
+  let currentId = templateId;
+
+  // Follow the chain backwards (previous_version_id)
+  while (currentId) {
+    const template = await getRecurringExpense(currentId);
+    if (!template || template.team_id !== teamId) break;
+
+    versions.push(template);
+
+    // Get previous version
+    if (template.previous_version_id) {
+      currentId = template.previous_version_id;
+    } else {
+      break;
+    }
+  }
+
+  return versions.reverse(); // Oldest first
 }
 
 // Get expenses generated from a recurring template

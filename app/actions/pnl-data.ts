@@ -3,6 +3,96 @@
 import { supabase } from "@/lib/supabase";
 import { unstable_cache } from "next/cache";
 
+// Helper to build expense list with instance/final logic
+// P&L shows exactly ONE value per month per template:
+// - If instance is closed: show final expense
+// - If instance is open: show expected amount from instance
+// - Regular expenses: show as normal
+async function buildPnlExpenses(teamId: string, prevYear: number, baseYear: number) {
+  // 1. Get final expenses from closed instances
+  const { data: finalExpenses } = await supabase
+    .from("team_expenses")
+    .select(`
+      id,
+      expense_date,
+      accounting_period,
+      supplier,
+      description,
+      doc_number,
+      amount,
+      amount_with_vat,
+      amount_without_vat,
+      vat_deductible,
+      status,
+      category_id,
+      subcategory_id,
+      is_recurring_placeholder,
+      recurring_instance_id
+    `)
+    .eq("team_id", teamId)
+    .is("deleted_at", null)
+    .not("recurring_instance_id", "is", null)
+    .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
+    .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`);
+
+  // 2. Get open instances as pseudo-expenses
+  const { data: openInstances } = await supabase
+    .from("recurring_instances")
+    .select("*")
+    .eq("team_id", teamId)
+    .eq("status", "open")
+    .gte("instance_year", prevYear)
+    .lte("instance_year", baseYear);
+
+  // 3. Get regular expenses (not part of recurring system)
+  const { data: regularExpenses } = await supabase
+    .from("team_expenses")
+    .select(`
+      id,
+      expense_date,
+      accounting_period,
+      supplier,
+      description,
+      doc_number,
+      amount,
+      amount_with_vat,
+      amount_without_vat,
+      vat_deductible,
+      status,
+      category_id,
+      subcategory_id,
+      is_recurring_placeholder
+    `)
+    .eq("team_id", teamId)
+    .is("deleted_at", null)
+    .is("recurring_instance_id", null)
+    .is("recurring_expense_id", null)
+    .in("status", ["approved", "paid", "pending", "draft", "final"])
+    .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
+    .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`);
+
+  // Convert open instances to expense-like format
+  const instanceExpenses = (openInstances || []).map((ri: any) => ({
+    id: ri.id,
+    expense_date: `${ri.instance_year}-${String(ri.instance_month).padStart(2, '0')}-01`,
+    accounting_period: `${ri.instance_year}-${String(ri.instance_month).padStart(2, '0')}`,
+    amount: ri.expected_amount,
+    amount_without_vat: ri.expected_amount_without_vat,
+    amount_with_vat: ri.expected_amount_with_vat,
+    vat_deductible: ri.expected_vat_deductible,
+    category_id: ri.expected_category_id,
+    subcategory_id: ri.expected_subcategory_id,
+    supplier: ri.expected_supplier,
+    description: ri.expected_description,
+    doc_number: null,
+    status: 'recurent',
+    is_recurring_placeholder: true,
+  }));
+
+  // Combine all three sources
+  return [...(finalExpenses || []), ...instanceExpenses, ...(regularExpenses || [])];
+}
+
 export interface PnlCategory {
   id: string;
   name: string;
@@ -55,8 +145,8 @@ export async function getPnlData(
   // Initialize empty arrays for 24 months
   const emptyMonths = () => Array(24).fill(0);
 
-  // OPTIMIZED: Fetch all data in parallel with a single Promise.all
-  const [categoriesResult, expensesResult, revenuesResult, budgetsResult] = await Promise.all([
+  // OPTIMIZED: Fetch all data in parallel
+  const [categoriesResult, expensesData, revenuesResult, budgetsResult] = await Promise.all([
     // Get categories structure
     supabase
       .from("team_expense_categories")
@@ -66,30 +156,8 @@ export async function getPnlData(
       .eq("category_type", "cheltuieli")
       .order("sort_order", { ascending: true }),
 
-    // Get all expenses for both years
-    supabase
-      .from("team_expenses")
-      .select(`
-        id,
-        expense_date,
-        accounting_period,
-        supplier,
-        description,
-        doc_number,
-        amount,
-        amount_with_vat,
-        amount_without_vat,
-        vat_deductible,
-        status,
-        category_id,
-        subcategory_id,
-        is_recurring_placeholder
-      `)
-      .eq("team_id", teamId)
-      .is("deleted_at", null)
-      .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
-      .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`)
-      .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]),
+    // Get all expenses with instance/final logic
+    buildPnlExpenses(teamId, prevYear, baseYear),
 
     // Get revenues for both years
     supabase
@@ -109,7 +177,6 @@ export async function getPnlData(
   ]);
 
   const categoriesData = categoriesResult.data;
-  const expensesData = expensesResult.data;
   const revenuesData = revenuesResult.data;
   const budgetsData = budgetsResult.data;
 
@@ -558,7 +625,7 @@ async function _fetchPnlDashboardData(
   const [
     rpcResult,
     categoriesResult,
-    expensesResult,
+    expensesData,
     revenuesResult,
     budgetsResult,
     expenseYearsResult,
@@ -585,19 +652,8 @@ async function _fetchPnlDashboardData(
       .eq("category_type", "cheltuieli")
       .order("sort_order", { ascending: true }),
 
-    // Expenses for both years (fallback if RPC fails)
-    supabase
-      .from("team_expenses")
-      .select(`
-        id, expense_date, accounting_period, supplier, description,
-        doc_number, amount, amount_with_vat, amount_without_vat,
-        vat_deductible, status, category_id, subcategory_id, is_recurring_placeholder
-      `)
-      .eq("team_id", teamId)
-      .is("deleted_at", null)
-      .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
-      .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`)
-      .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]),
+    // Expenses with instance/final logic (fallback if RPC fails)
+    buildPnlExpenses(teamId, prevYear, baseYear),
 
     // Revenues (fallback if RPC fails)
     supabase
@@ -643,7 +699,6 @@ async function _fetchPnlDashboardData(
   }
 
   const categoriesData = categoriesResult.data;
-  const expensesData = expensesResult.data;
   const revenuesData = revenuesResult.data;
   const budgetsData = budgetsResult.data;
 
