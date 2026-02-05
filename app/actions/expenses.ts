@@ -40,6 +40,8 @@ export interface TeamExpense {
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
+  recurring_instance_id: string | null; // Link to recurring instance (for recurring expenses)
+  recurring_expense_id: string | null; // Legacy: Link to recurring template
 }
 
 export interface ExpenseInput {
