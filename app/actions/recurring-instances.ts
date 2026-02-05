@@ -189,10 +189,10 @@ export async function convertToFinalExpense(
     );
 
     const actualPnlAmount = calculatePnlAmount(
-      expenseData.amountWithVat,
-      expenseData.amountWithoutVat,
+      expenseData.amountWithVat ?? null,
+      expenseData.amountWithoutVat ?? null,
       expenseData.amount,
-      expenseData.vatDeductible
+      expenseData.vatDeductible ?? false
     );
 
     const diffPercent = expectedPnlAmount > 0
