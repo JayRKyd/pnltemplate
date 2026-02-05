@@ -1,6 +1,6 @@
 "use server";
 
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { stackServerApp } from "@/stack";
 
 export interface SuperAdmin {
@@ -14,6 +14,7 @@ export interface SuperAdmin {
 
 /**
  * Check if a user is a Super Admin
+ * Uses supabaseAdmin to bypass RLS since Stack Auth and Supabase Auth are separate systems
  */
 export async function isSuperAdmin(userId?: string): Promise<boolean> {
   if (!userId) {
@@ -23,7 +24,8 @@ export async function isSuperAdmin(userId?: string): Promise<boolean> {
     userId = user.id;
   }
 
-  const { data, error } = await supabase
+  // Use supabaseAdmin to bypass RLS (Stack Auth user ID won't match Supabase auth.uid())
+  const { data, error } = await supabaseAdmin
     .from("super_admins")
     .select("id")
     .eq("user_id", userId)
@@ -46,7 +48,7 @@ export async function checkCurrentUserIsSuperAdmin(): Promise<boolean> {
  * Get all Super Admins
  */
 export async function getSuperAdmins(): Promise<SuperAdmin[]> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("super_admins")
     .select("*")
     .order("created_at", { ascending: true });
@@ -79,7 +81,7 @@ export async function addSuperAdmin(
   }
 
   // Check if email already exists
-  const { data: existing } = await supabase
+  const { data: existing } = await supabaseAdmin
     .from("super_admins")
     .select("id")
     .eq("email", email)
@@ -90,7 +92,7 @@ export async function addSuperAdmin(
   }
 
   // If userId not provided, we'll set it when they accept invitation
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("super_admins")
     .insert({
       user_id: userId || `pending-${Date.now()}`,
@@ -125,7 +127,7 @@ export async function removeSuperAdmin(
   }
 
   // Don't allow removing yourself
-  const { data: targetAdmin } = await supabase
+  const { data: targetAdmin } = await supabaseAdmin
     .from("super_admins")
     .select("user_id")
     .eq("id", superAdminId)
@@ -136,7 +138,7 @@ export async function removeSuperAdmin(
   }
 
   // Count remaining super admins
-  const { count } = await supabase
+  const { count } = await supabaseAdmin
     .from("super_admins")
     .select("id", { count: "exact" });
 
@@ -144,7 +146,7 @@ export async function removeSuperAdmin(
     return { success: false, error: "Cannot remove the last Super Admin" };
   }
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("super_admins")
     .delete()
     .eq("id", superAdminId);
@@ -161,7 +163,7 @@ export async function removeSuperAdmin(
  * Get Super Admin by email
  */
 export async function getSuperAdminByEmail(email: string): Promise<SuperAdmin | null> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("super_admins")
     .select("*")
     .eq("email", email)
