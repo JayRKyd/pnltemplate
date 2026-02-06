@@ -51,8 +51,9 @@ export default function CompaniesPage() {
   const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Get user's selected team for navigation
-  const selectedTeam = user.selectedTeam;
+  // Get user's teams - selectedTeam may be null outside /dashboard/[teamId]
+  const teams = user.useTeams();
+  const selectedTeam = user.selectedTeam || teams?.[0] || null;
 
   // Refresh team members
   const refreshMembers = async () => {
@@ -210,6 +211,9 @@ export default function CompaniesPage() {
   }, [actionMenuOpen]);
 
   useEffect(() => {
+    // Wait for teams to load before deciding access
+    if (!teams) return;
+
     const init = async () => {
       const isSuper = await checkCurrentUserIsSuperAdmin();
       if (isSuper) {
@@ -222,14 +226,14 @@ export default function CompaniesPage() {
         return;
       }
 
-      // Non-super-admin: any team member can view their company
-      const selectedTeamId = selectedTeam?.id;
-      if (selectedTeamId) {
-        const myCompany = await getCompanyByTeamId(selectedTeamId);
+      // Non-super-admin: try each team to find one with a company
+      const teamId = selectedTeam?.id;
+      if (teamId) {
+        const myCompany = await getCompanyByTeamId(teamId);
         if (myCompany) {
           setHasAccess(true);
           // Check if company admin for edit rights
-          const adminStatus = await isCompanyAdmin(selectedTeamId);
+          const adminStatus = await isCompanyAdmin(teamId);
           setIsAdmin(adminStatus);
           // Load only their own company with member count
           const members = await getCompanyTeamMembers(myCompany.id);
@@ -240,10 +244,10 @@ export default function CompaniesPage() {
       }
 
       // No company found — redirect
-      router.replace(selectedTeamId ? `/dashboard/${selectedTeamId}` : '/');
+      router.replace(teamId ? `/dashboard/${teamId}` : '/');
     };
     init();
-  }, [router, selectedTeam]);
+  }, [router, selectedTeam, teams]);
 
   if (loading) {
     return (
