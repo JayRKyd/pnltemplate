@@ -129,7 +129,7 @@ export async function getCompany(companyId: string): Promise<Company | null> {
   const currentUser = await stackServerApp.getUser();
   if (!currentUser) return null;
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("companies")
     .select("*")
     .eq("id", companyId)
@@ -140,11 +140,11 @@ export async function getCompany(companyId: string): Promise<Company | null> {
     return null;
   }
 
-  // Check permissions - Super Admin or team member
+  // Check permissions - Super Admin, team member, or pending invite
   const isSuper = await isSuperAdmin(currentUser.id);
   if (!isSuper) {
     // Check if user is member of this team
-    const { data: membership } = await supabase
+    const { data: membership } = await supabaseAdmin
       .from("team_memberships")
       .select("role")
       .eq("team_id", data.team_id)
@@ -152,7 +152,18 @@ export async function getCompany(companyId: string): Promise<Company | null> {
       .single();
 
     if (!membership) {
-      return null; // User is not part of this company
+      // Also check pending whitelist invite
+      const { data: invite } = await supabaseAdmin
+        .from("user_whitelist")
+        .select("id")
+        .eq("team_id", data.team_id)
+        .eq("email", currentUser.primaryEmail)
+        .eq("status", "pending")
+        .single();
+
+      if (!invite) {
+        return null; // User is not part of this company
+      }
     }
   }
 
@@ -241,6 +252,40 @@ export async function getMyCompanies(): Promise<{ company: Company; role: string
     const role = teamRoleMap.get(company.team_id) || "member";
     return { company, role };
   });
+}
+
+/**
+ * Get the current user's role for a company's team
+ * Checks both team_memberships AND pending whitelist invites
+ */
+export async function getMyCompanyRole(teamId: string): Promise<string | null> {
+  const currentUser = await stackServerApp.getUser();
+  if (!currentUser) return null;
+
+  // 1. Check active team membership
+  const { data: membership } = await supabaseAdmin
+    .from("team_memberships")
+    .select("role")
+    .eq("team_id", teamId)
+    .eq("user_id", currentUser.id)
+    .single();
+
+  if (membership) return membership.role;
+
+  // 2. Check pending whitelist invite
+  if (currentUser.primaryEmail) {
+    const { data: invite } = await supabaseAdmin
+      .from("user_whitelist")
+      .select("role")
+      .eq("team_id", teamId)
+      .eq("email", currentUser.primaryEmail)
+      .eq("status", "pending")
+      .single();
+
+    if (invite) return invite.role || "member";
+  }
+
+  return null;
 }
 
 /**
@@ -629,7 +674,7 @@ export async function getCompanyTeamMembers(
 
   if (!company) return [];
 
-  // Check permissions - Super Admin or team member
+  // Check permissions - Super Admin, team member, or pending invite
   const isSuper = await isSuperAdmin(currentUser.id);
   if (!isSuper) {
     const { data: membership } = await supabaseAdmin
@@ -639,7 +684,18 @@ export async function getCompanyTeamMembers(
       .eq("user_id", currentUser.id)
       .single();
 
-    if (!membership) return [];
+    if (!membership) {
+      // Also check pending whitelist invites
+      const { data: invite } = await supabaseAdmin
+        .from("user_whitelist")
+        .select("id")
+        .eq("team_id", company.team_id)
+        .eq("email", currentUser.primaryEmail)
+        .eq("status", "pending")
+        .single();
+
+      if (!invite) return [];
+    }
   }
 
   // Use team_members_with_profiles view - this joins memberships with stack_users
