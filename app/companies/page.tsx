@@ -13,7 +13,8 @@ import {
   resendUserInvitation,
   updateCompanyUser,
   toggleUserActive,
-  removeCompanyUser
+  removeCompanyUser,
+  getCompanyByTeamId
 } from '@/app/actions/companies';
 import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
 
@@ -209,7 +210,17 @@ export default function CompaniesPage() {
     const init = async () => {
       const isSuper = await checkCurrentUserIsSuperAdmin();
       if (!isSuper) {
-        router.push('/dashboard');
+        // Non-super-admins: redirect to their own company page if they have one
+        const selectedTeamId = selectedTeam?.id;
+        if (selectedTeamId) {
+          const myCompany = await getCompanyByTeamId(selectedTeamId);
+          if (myCompany) {
+            router.replace(`/companies/${myCompany.id}`);
+            return;
+          }
+        }
+        // Fallback: redirect to team dashboard
+        router.replace(selectedTeamId ? `/dashboard/${selectedTeamId}` : '/');
         return;
       }
       setIsSuperAdmin(true);
@@ -218,7 +229,7 @@ export default function CompaniesPage() {
       setLoading(false);
     };
     init();
-  }, [router]);
+  }, [router, selectedTeam]);
 
   if (loading) {
     return (

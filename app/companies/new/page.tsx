@@ -38,7 +38,7 @@ export default function NewCompanyPage() {
     const init = async () => {
       const isSuper = await checkCurrentUserIsSuperAdmin();
       if (!isSuper) {
-        router.push('/dashboard');
+        router.replace('/');
         return;
       }
       setIsSuperAdmin(true);

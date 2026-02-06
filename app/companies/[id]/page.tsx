@@ -29,7 +29,7 @@ import {
   BudgetCategory
 } from '@/app/actions/companies';
 import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
-import { getUserRole } from '@/app/actions/permissions';
+import { getMyTeamRole } from '@/app/actions/team-members';
 
 type UserRole = 'super_admin' | 'company_admin' | 'company_user' | null;
 
@@ -80,12 +80,12 @@ export default function CompanyDetailPage() {
       if (isSuper) {
         setUserRole('super_admin');
       } else {
-        // Check if user is member of this company's team
-        const role = await getUserRole(companyData.team_id);
+        // Check if user actually belongs to this company's team
+        const role = await getMyTeamRole(companyData.team_id);
 
         if (!role) {
-          // User doesn't belong to this company
-          router.push('/dashboard');
+          // User doesn't belong to this company — redirect to home
+          router.replace('/');
           return;
         }
 
