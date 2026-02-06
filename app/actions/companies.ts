@@ -1,6 +1,6 @@
 "use server";
 
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { stackServerApp } from "@/stack";
 import { isSuperAdmin } from "./super-admin";
 import crypto from "crypto";
@@ -175,6 +175,43 @@ export async function getCompanyByTeamId(teamId: string): Promise<Company | null
   }
 
   return data;
+}
+
+/**
+ * Get the current user's company (server-side, bypasses RLS)
+ * Returns the company + role for the current authenticated user
+ */
+export async function getMyCompany(): Promise<{ company: Company; role: string } | null> {
+  const currentUser = await stackServerApp.getUser();
+  if (!currentUser) return null;
+
+  // Find the user's team memberships
+  const { data: memberships, error: memError } = await supabaseAdmin
+    .from("team_memberships")
+    .select("team_id, role")
+    .eq("user_id", currentUser.id);
+
+  if (memError || !memberships || memberships.length === 0) {
+    console.log("[getMyCompany] No memberships found for user:", currentUser.id);
+    return null;
+  }
+
+  // Check each team for an associated company
+  const teamIds = memberships.map(m => m.team_id);
+  const { data: companies, error: compError } = await supabaseAdmin
+    .from("companies")
+    .select("*")
+    .in("team_id", teamIds);
+
+  if (compError || !companies || companies.length === 0) {
+    console.log("[getMyCompany] No companies found for teams:", teamIds);
+    return null;
+  }
+
+  // Return first company found with the user's role in that team
+  const company = companies[0];
+  const membership = memberships.find(m => m.team_id === company.team_id);
+  return { company, role: membership?.role || "member" };
 }
 
 /**

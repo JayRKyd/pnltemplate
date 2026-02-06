@@ -14,10 +14,9 @@ import {
   updateCompanyUser,
   toggleUserActive,
   removeCompanyUser,
-  getCompanyByTeamId
+  getMyCompany
 } from '@/app/actions/companies';
 import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
-import { isCompanyAdmin } from '@/app/actions/permissions';
 
 export default function CompaniesPage() {
   const router = useRouter();
@@ -51,7 +50,7 @@ export default function CompaniesPage() {
   const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Get user's teams - selectedTeam may be null outside /dashboard/[teamId]
+  // Get user's selected team for navigation back
   const teams = user.useTeams();
   const selectedTeam = user.selectedTeam || teams?.[0] || null;
 
@@ -211,9 +210,6 @@ export default function CompaniesPage() {
   }, [actionMenuOpen]);
 
   useEffect(() => {
-    // Wait for teams to load before deciding access
-    if (!teams) return;
-
     const init = async () => {
       const isSuper = await checkCurrentUserIsSuperAdmin();
       if (isSuper) {
@@ -226,28 +222,24 @@ export default function CompaniesPage() {
         return;
       }
 
-      // Non-super-admin: try each team to find one with a company
-      const teamId = selectedTeam?.id;
-      if (teamId) {
-        const myCompany = await getCompanyByTeamId(teamId);
-        if (myCompany) {
-          setHasAccess(true);
-          // Check if company admin for edit rights
-          const adminStatus = await isCompanyAdmin(teamId);
-          setIsAdmin(adminStatus);
-          // Load only their own company with member count
-          const members = await getCompanyTeamMembers(myCompany.id);
-          setCompanies([{ ...myCompany, user_count: members.length } as CompanyWithUsers]);
-          setLoading(false);
-          return;
-        }
+      // Non-super-admin: server-side lookup of user's company
+      const result = await getMyCompany();
+      if (result) {
+        setHasAccess(true);
+        setIsAdmin(result.role === 'admin');
+        // Load member count
+        const members = await getCompanyTeamMembers(result.company.id);
+        setCompanies([{ ...result.company, user_count: members.length } as CompanyWithUsers]);
+        setLoading(false);
+        return;
       }
 
       // No company found — redirect
+      const teamId = selectedTeam?.id;
       router.replace(teamId ? `/dashboard/${teamId}` : '/');
     };
     init();
-  }, [router, selectedTeam, teams]);
+  }, [router]);
 
   if (loading) {
     return (
