@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Utilizatori } from '@/testcode/utilizatori';
 import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
-import { isCompanyAdmin } from '@/app/actions/permissions';
+import { getCompanyByTeamId } from '@/app/actions/companies';
 
 interface UserDropdownProps {
   colorModeToggle?: () => void;
@@ -30,7 +30,7 @@ export function UserDropdown({ colorModeToggle, teamId }: UserDropdownProps) {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [showCompanii, setShowCompanii] = useState(false);
 
-  // Check if current user is a Super Admin or Company Admin
+  // Check if current user should see Companii link
   useEffect(() => {
     const checkRoles = async () => {
       const superResult = await checkCurrentUserIsSuperAdmin();
@@ -38,8 +38,9 @@ export function UserDropdown({ colorModeToggle, teamId }: UserDropdownProps) {
       if (superResult) {
         setShowCompanii(true);
       } else if (teamId) {
-        const adminResult = await isCompanyAdmin(teamId);
-        setShowCompanii(adminResult);
+        // Show Companii for any user whose team has a company
+        const company = await getCompanyByTeamId(teamId);
+        setShowCompanii(!!company);
       }
     };
     checkRoles();

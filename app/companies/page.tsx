@@ -26,6 +26,7 @@ export default function CompaniesPage() {
   const [loading, setLoading] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [hasAccess, setHasAccess] = useState(false);
 
   // Users modal state
   const [usersModalOpen, setUsersModalOpen] = useState(false);
@@ -214,30 +215,31 @@ export default function CompaniesPage() {
       if (isSuper) {
         setIsSuperAdmin(true);
         setIsAdmin(true);
+        setHasAccess(true);
         const data = await getCompanies();
         setCompanies(data);
         setLoading(false);
         return;
       }
 
-      // Non-super-admin: check if company admin for their team
+      // Non-super-admin: any team member can view their company
       const selectedTeamId = selectedTeam?.id;
       if (selectedTeamId) {
-        const adminStatus = await isCompanyAdmin(selectedTeamId);
-        if (adminStatus) {
-          setIsAdmin(true);
+        const myCompany = await getCompanyByTeamId(selectedTeamId);
+        if (myCompany) {
+          setHasAccess(true);
+          // Check if company admin for edit rights
+          const adminStatus = await isCompanyAdmin(selectedTeamId);
+          setIsAdmin(adminStatus);
           // Load only their own company with member count
-          const myCompany = await getCompanyByTeamId(selectedTeamId);
-          if (myCompany) {
-            const members = await getCompanyTeamMembers(myCompany.id);
-            setCompanies([{ ...myCompany, user_count: members.length } as CompanyWithUsers]);
-            setLoading(false);
-            return;
-          }
+          const members = await getCompanyTeamMembers(myCompany.id);
+          setCompanies([{ ...myCompany, user_count: members.length } as CompanyWithUsers]);
+          setLoading(false);
+          return;
         }
       }
 
-      // Regular user or no company — redirect
+      // No company found — redirect
       router.replace(selectedTeamId ? `/dashboard/${selectedTeamId}` : '/');
     };
     init();
@@ -254,7 +256,7 @@ export default function CompaniesPage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!hasAccess) {
     return null;
   }
 
@@ -425,8 +427,8 @@ export default function CompaniesPage() {
               </div>
             </div>
 
-            {/* Add User Form */}
-            {showAddForm && (
+            {/* Add User Form - Admin only */}
+            {isAdmin && showAddForm && (
               <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
@@ -476,8 +478,8 @@ export default function CompaniesPage() {
               </div>
             )}
 
-            {/* Edit User Form */}
-            {editingMember && (
+            {/* Edit User Form - Admin only */}
+            {isAdmin && editingMember && (
               <div className="px-6 py-4 border-b border-gray-100 bg-blue-50">
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-gray-600">Editează rol pentru <strong>{editingMember.email}</strong>:</span>
@@ -537,7 +539,7 @@ export default function CompaniesPage() {
                       <th className="text-center py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                         Status
                       </th>
-                      <th className="w-12"></th>
+                      {isAdmin && <th className="w-12"></th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -620,6 +622,7 @@ export default function CompaniesPage() {
                               </span>
                             )}
                           </td>
+                          {isAdmin && (
                           <td className="py-4 relative">
                             {actionLoading === member.id ? (
                               <Loader2 size={18} className="animate-spin text-gray-400" />
@@ -692,6 +695,7 @@ export default function CompaniesPage() {
                               </div>
                             )}
                           </td>
+                          )}
                         </tr>
                       ))
                     )}
@@ -700,18 +704,20 @@ export default function CompaniesPage() {
               )}
             </div>
 
-            {/* Footer with Add button */}
-            <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
-              {!showAddForm && !editingMember && (
-                <button
-                  onClick={() => setShowAddForm(true)}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-[#00C9A7] to-[#00D4AA] text-white rounded-full font-medium hover:opacity-90 transition-all text-sm"
-                >
-                  <UserPlus size={16} />
-                  Adaugă coleg
-                </button>
-              )}
-            </div>
+            {/* Footer with Add button - Admin only */}
+            {isAdmin && (
+              <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
+                {!showAddForm && !editingMember && (
+                  <button
+                    onClick={() => setShowAddForm(true)}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-[#00C9A7] to-[#00D4AA] text-white rounded-full font-medium hover:opacity-90 transition-all text-sm"
+                  >
+                    <UserPlus size={16} />
+                    Adaugă coleg
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
