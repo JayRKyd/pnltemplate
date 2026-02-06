@@ -264,6 +264,7 @@ export async function syncTeamMembership(teamId: string, role: string = "member"
 
 // Get all members of a team from Supabase
 // Optimized: Uses database view to avoid N+1 query pattern
+// Note: Super-admins are excluded from company user lists (they have global access)
 export async function getTeamMembers(teamId: string): Promise<TeamMemberWithProfile[]> {
   // Use the optimized view that joins memberships with user profiles
   const { data, error } = await supabase
@@ -281,7 +282,16 @@ export async function getTeamMembers(teamId: string): Promise<TeamMemberWithProf
     throw error;
   }
 
-  return (data || []).map((m) => ({
+  // Get list of super-admin user IDs to exclude them from company user lists
+  const { data: superAdmins } = await supabase
+    .from("super_admins")
+    .select("user_id");
+  const superAdminIds = new Set((superAdmins || []).map(sa => sa.user_id));
+
+  // Filter out super-admins - they have global access and shouldn't appear in company lists
+  const filteredData = (data || []).filter(m => !superAdminIds.has(m.user_id));
+
+  return filteredData.map((m) => ({
     user_id: m.user_id,
     email: m.email || null,
     name: m.name || null,
@@ -307,7 +317,17 @@ async function getTeamMembersFallback(teamId: string): Promise<TeamMemberWithPro
 
   if (!memberships || memberships.length === 0) return [];
 
-  const userIds = memberships.map((m) => m.user_id);
+  // Get list of super-admin user IDs to exclude them
+  const { data: superAdmins } = await supabase
+    .from("super_admins")
+    .select("user_id");
+  const superAdminIds = new Set((superAdmins || []).map(sa => sa.user_id));
+
+  // Filter out super-admins
+  const filteredMemberships = memberships.filter(m => !superAdminIds.has(m.user_id));
+  if (filteredMemberships.length === 0) return [];
+
+  const userIds = filteredMemberships.map((m) => m.user_id);
   const { data: users, error: userError } = await supabase
     .from("stack_users")
     .select("id, email, name, avatar_url")
@@ -320,7 +340,7 @@ async function getTeamMembersFallback(teamId: string): Promise<TeamMemberWithPro
 
   const userMap = new Map(users?.map((u) => [u.id, u]) || []);
   
-  return memberships.map((m) => {
+  return filteredMemberships.map((m) => {
     const user = userMap.get(m.user_id);
     return {
       user_id: m.user_id,

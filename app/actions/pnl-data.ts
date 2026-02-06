@@ -9,8 +9,9 @@ import { unstable_cache } from "next/cache";
 // - If instance is open: show expected amount from instance
 // - Regular expenses: show as normal
 async function buildPnlExpenses(teamId: string, prevYear: number, baseYear: number) {
-  // 1. Get final expenses from closed instances
-  const { data: finalExpenses } = await supabase
+  // Get all expenses for the date range
+  // Note: recurring_instance_id column doesn't exist - simplified query
+  const { data: allExpenses, error } = await supabase
     .from("team_expenses")
     .select(`
       id,
@@ -27,49 +28,60 @@ async function buildPnlExpenses(teamId: string, prevYear: number, baseYear: numb
       category_id,
       subcategory_id,
       is_recurring_placeholder,
-      recurring_instance_id
+      recurring_expense_id
     `)
     .eq("team_id", teamId)
     .is("deleted_at", null)
-    .not("recurring_instance_id", "is", null)
-    .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
-    .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`);
+    .in("status", ["approved", "paid", "pending", "draft", "final", "recurent"]);
 
-  // 2. Get open instances as pseudo-expenses
-  const { data: openInstances } = await supabase
-    .from("recurring_instances")
-    .select("*")
-    .eq("team_id", teamId)
-    .eq("status", "open")
-    .gte("instance_year", prevYear)
-    .lte("instance_year", baseYear);
+  if (error) {
+    console.error("Error fetching expenses:", error);
+    return [];
+  }
 
-  // 3. Get regular expenses (not part of recurring system)
-  const { data: regularExpenses } = await supabase
-    .from("team_expenses")
-    .select(`
-      id,
-      expense_date,
-      accounting_period,
-      supplier,
-      description,
-      doc_number,
-      amount,
-      amount_with_vat,
-      amount_without_vat,
-      vat_deductible,
-      status,
-      category_id,
-      subcategory_id,
-      is_recurring_placeholder
-    `)
-    .eq("team_id", teamId)
-    .is("deleted_at", null)
-    .is("recurring_instance_id", null)
-    .is("recurring_expense_id", null)
-    .in("status", ["approved", "paid", "pending", "draft", "final"])
-    .or(`expense_date.gte.${prevYear}-01-01,accounting_period.gte.${prevYear}-01`)
-    .or(`expense_date.lte.${baseYear}-12-31,accounting_period.lte.${baseYear}-12`);
+  // Filter by date range in JS (more reliable than complex OR conditions)
+  const filteredExpenses = (allExpenses || []).filter(expense => {
+    // Check accounting_period first if available
+    if (expense.accounting_period) {
+      const [yearStr] = expense.accounting_period.split('-');
+      const year = parseInt(yearStr);
+      return year >= prevYear && year <= baseYear;
+    }
+    // Fall back to expense_date
+    if (expense.expense_date) {
+      const year = new Date(expense.expense_date).getFullYear();
+      return year >= prevYear && year <= baseYear;
+    }
+    return false;
+  });
+
+  // Get open instances as pseudo-expenses (only from ACTIVE templates)
+  let openInstances: any[] = [];
+  try {
+    // First get active template IDs
+    const { data: activeTemplates } = await supabase
+      .from("team_recurring_expenses")
+      .select("id")
+      .eq("team_id", teamId)
+      .eq("is_active", true)
+      .is("deleted_at", null);
+
+    const activeTemplateIds = (activeTemplates || []).map(t => t.id);
+
+    if (activeTemplateIds.length > 0) {
+      const { data: instances } = await supabase
+        .from("recurring_instances")
+        .select("*")
+        .eq("team_id", teamId)
+        .eq("status", "open")
+        .in("template_id", activeTemplateIds)
+        .gte("instance_year", prevYear)
+        .lte("instance_year", baseYear);
+      openInstances = instances || [];
+    }
+  } catch (e) {
+    // Table might not exist, ignore
+  }
 
   // Convert open instances to expense-like format
   const instanceExpenses = (openInstances || []).map((ri: any) => ({
@@ -89,8 +101,12 @@ async function buildPnlExpenses(teamId: string, prevYear: number, baseYear: numb
     is_recurring_placeholder: true,
   }));
 
-  // Combine all three sources
-  return [...(finalExpenses || []), ...instanceExpenses, ...(regularExpenses || [])];
+  // Exclude old placeholder expenses from team_expenses when we have recurring_instances
+  // The recurring_instances system is now the authoritative source for recurring data
+  const nonPlaceholderExpenses = filteredExpenses.filter((e: any) => !e.is_recurring_placeholder);
+
+  // Combine real expenses with open instances from active templates
+  return [...nonPlaceholderExpenses, ...instanceExpenses];
 }
 
 export interface PnlCategory {
@@ -303,29 +319,6 @@ export async function getPnlData(
     };
   });
 
-  // Add "Uncategorized" category for expenses without a category_id
-  // This ensures ALL expenses show up, even if categories aren't defined
-  const uncategorizedValues = emptyMonths();
-  expensesData?.forEach(expense => {
-    if (!expense.category_id) {
-      const idx = getMonthIndex(expense.expense_date, expense.accounting_period);
-      if (idx >= 0 && idx < 24) {
-        uncategorizedValues[idx] += getExpenseAmount(expense);
-      }
-    }
-  });
-  
-  // Only add Uncategorized if there are uncategorized expenses
-  const hasUncategorized = uncategorizedValues.some(v => v > 0);
-  if (hasUncategorized) {
-    categories.push({
-      id: 'uncategorized',
-      name: 'Neclasificate',
-      values: uncategorizedValues,
-      subcategories: [],
-    });
-  }
-
   // Calculate revenue per month
   const venituri = emptyMonths();
   revenuesData?.forEach(rev => {
@@ -492,6 +485,34 @@ export async function getCategoryExpenses(
     .or(`category_id.eq.${category.id},subcategory_id.eq.${category.id}`)
     .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]);
 
+  // Also fetch open recurring instances for this category and month (only from ACTIVE templates)
+  let openInstances: any[] = [];
+  try {
+    const { data: activeTemplates } = await supabase
+      .from("team_recurring_expenses")
+      .select("id")
+      .eq("team_id", teamId)
+      .eq("is_active", true)
+      .is("deleted_at", null);
+
+    const activeTemplateIds = (activeTemplates || []).map((t: any) => t.id);
+
+    if (activeTemplateIds.length > 0) {
+      const { data: instances } = await supabase
+        .from("recurring_instances")
+        .select("*")
+        .eq("team_id", teamId)
+        .eq("status", "open")
+        .in("template_id", activeTemplateIds)
+        .eq("instance_year", year)
+        .eq("instance_month", month)
+        .or(`expected_category_id.eq.${category.id},expected_subcategory_id.eq.${category.id}`);
+      openInstances = instances || [];
+    }
+  } catch (e) {
+    // Table might not exist yet
+  }
+
   // Filter expenses by accounting_period (Luna P&L) or expense_date
   const targetMonthStr = String(month).padStart(2, '0');
   const targetAccountingPeriod = `${year}-${targetMonthStr}`;
@@ -506,7 +527,26 @@ export async function getCategoryExpenses(
     return expenseDate.getFullYear() === year && expenseDate.getMonth() + 1 === month;
   });
 
-  return filteredExpenses.map(e => ({
+  // Convert open recurring instances to the same format
+  const instanceExpenses: PnlExpense[] = openInstances.map(ri => ({
+    id: ri.id,
+    date: `${ri.instance_year}-${String(ri.instance_month).padStart(2, '0')}-01`,
+    supplier: ri.expected_supplier || 'Recurent',
+    description: ri.expected_description || 'Cheltuială recurentă',
+    invoiceNumber: '',
+    amount: ri.expected_vat_deductible
+      ? (ri.expected_amount_without_vat || ri.expected_amount || 0)
+      : (ri.expected_amount_with_vat || ri.expected_amount || 0),
+    status: 'recurent',
+    category: categoryName,
+    subcategory: '',
+    type: 'recurente' as const,
+  }));
+
+  // Exclude old placeholder expenses - recurring_instances is now authoritative
+  const nonPlaceholderExpenses = filteredExpenses.filter((e: any) => !e.is_recurring_placeholder);
+
+  const realExpenses: PnlExpense[] = nonPlaceholderExpenses.map(e => ({
     id: e.id,
     date: e.expense_date,
     supplier: e.supplier || 'Unknown',
@@ -516,8 +556,10 @@ export async function getCategoryExpenses(
     status: e.status || 'pending',
     category: categoryName,
     subcategory: '',
-    type: e.is_recurring_placeholder ? 'recurente' : 'reale',
+    type: 'reale',
   }));
+
+  return [...realExpenses, ...instanceExpenses];
 }
 
 /**

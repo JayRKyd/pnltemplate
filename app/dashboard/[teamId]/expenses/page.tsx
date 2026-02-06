@@ -639,11 +639,20 @@ export default function ExpensesPage() {
 
   function formatExpenseDate(dateStr: string | null): string {
     if (!dateStr) return '-';
-    const date = new Date(dateStr);
     const months = ['ian', 'feb', 'mar', 'apr', 'mai', 'iun', 'iul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = months[date.getMonth()];
-    const year = date.getFullYear().toString().slice(-2);
+    // Parse date string directly to avoid timezone shift (e.g. "2026-02-01" → Jan 31 in local TZ)
+    const parts = dateStr.split('T')[0].split('-');
+    if (parts.length === 3) {
+      const day = parts[2].padStart(2, '0');
+      const month = months[parseInt(parts[1], 10) - 1];
+      const year = parts[0].slice(-2);
+      return `${day}.${month}.${year}`;
+    }
+    // Fallback for unexpected formats
+    const date = new Date(dateStr);
+    const day = date.getUTCDate().toString().padStart(2, '0');
+    const month = months[date.getUTCMonth()];
+    const year = date.getUTCFullYear().toString().slice(-2);
     return `${day}.${month}.${year}`;
   }
 

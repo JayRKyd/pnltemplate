@@ -20,9 +20,14 @@ export async function isSuperAdmin(userId?: string): Promise<boolean> {
   if (!userId) {
     // Try to get current user from Stack Auth
     const user = await stackServerApp.getUser();
-    if (!user) return false;
+    if (!user) {
+      console.log('[isSuperAdmin] No user found');
+      return false;
+    }
     userId = user.id;
   }
+
+  console.log('[isSuperAdmin] Checking user_id:', userId);
 
   // Use supabaseAdmin to bypass RLS (Stack Auth user ID won't match Supabase auth.uid())
   const { data, error } = await supabaseAdmin
@@ -30,6 +35,8 @@ export async function isSuperAdmin(userId?: string): Promise<boolean> {
     .select("id")
     .eq("user_id", userId)
     .single();
+
+  console.log('[isSuperAdmin] Query result:', { data, error: error?.message });
 
   if (error || !data) return false;
   return true;

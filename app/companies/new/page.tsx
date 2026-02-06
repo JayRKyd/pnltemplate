@@ -8,11 +8,9 @@ import { createCompany, sendCompanyInvitation } from '@/app/actions/companies';
 import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
 
 const ROLES = [
-  { value: 'admin', label: 'Admin' },
-  { value: 'member', label: 'Member' },
-  { value: 'approver', label: 'Approver' },
-  { value: 'level2', label: 'Level 2' },
-  { value: 'accounting_viewer', label: 'Accounting Viewer' },
+  { value: 'admin', label: 'Company Admin' },
+  { value: 'member', label: 'Regular User' },
+  { value: 'accountant', label: 'Accountant' },
 ];
 
 const SUPER_ADMIN_ROLE = { value: 'super_admin', label: 'Super Admin' };

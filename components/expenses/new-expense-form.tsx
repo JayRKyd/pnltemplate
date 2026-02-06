@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { X, Upload, ChevronDown, Plus, Check, AlertTriangle, Loader2 } from "lucide-react";
-import { createExpense, createMultiLineExpense, updateExpense, getExpense, submitForApproval, ExpenseInput, ExpenseLineInput, TeamExpense } from "@/app/actions/expenses";
+import { createExpense, createMultiLineExpense, updateExpense, getExpense, deleteExpense, submitForApproval, ExpenseInput, ExpenseLineInput, TeamExpense } from "@/app/actions/expenses";
 import { uploadAttachment, getExpenseAttachments, getAttachmentUrl } from "@/app/actions/attachments";
 import { CalendarModal } from "@/components/ui/calendar-modal";
 import { getCategoryTree, CategoryWithChildren } from "@/app/actions/categories";
@@ -407,12 +407,30 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expenseId, teamId]);
 
+  const [deleting, setDeleting] = useState(false);
+
   // Handle back navigation
   const handleBack = () => {
     if (onBack) {
       onBack();
     } else {
       router.push(`/dashboard/${teamId}/expenses`);
+    }
+  };
+
+  // Handle delete expense (FR-7: also reopens linked recurring instance)
+  const handleDelete = async () => {
+    if (!expenseId || deleting) return;
+    if (!confirm('Sigur dorești să ștergi această cheltuială?')) return;
+    
+    setDeleting(true);
+    try {
+      await deleteExpense(expenseId, teamId);
+      router.push(`/dashboard/${teamId}/expenses`);
+    } catch (err) {
+      console.error('Failed to delete expense:', err);
+      alert('Eroare la ștergere. Încearcă din nou.');
+      setDeleting(false);
     }
   };
 
@@ -1535,6 +1553,35 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                 </div>
               </div>
             ))}
+
+            {/* Delete button (edit mode only) */}
+            {expenseId && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                <button 
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  style={{
+                    ...buttonBaseStyle,
+                    padding: '8px 24px',
+                    height: '40px',
+                    backgroundColor: 'white',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    borderRadius: '9999px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    opacity: deleting ? 0.5 : 1
+                  }}
+                >
+                  {deleting ? (
+                    <Loader2 size={14} className="animate-spin" style={{ color: 'rgba(239, 68, 68, 1)' }} />
+                  ) : (
+                    <span style={{ color: 'rgba(239, 68, 68, 1)', fontSize: '13px', fontWeight: 500 }}>Șterge cheltuială</span>
+                  )}
+                </button>
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div style={{ display: 'flex', gap: '30px', marginTop: '12px' }}>

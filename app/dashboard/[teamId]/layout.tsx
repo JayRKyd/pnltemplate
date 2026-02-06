@@ -21,6 +21,7 @@ import { useParams, useRouter } from "next/navigation";
 import { UpsertUserOnMount } from "./layout.client";
 import { useState, useEffect } from "react";
 import { isCompanyAdmin } from "@/app/actions/permissions";
+import { getCompanyByTeamId } from "@/app/actions/companies";
 
 export default function Layout(props: { children: React.ReactNode }) {
   const params = useParams<{ teamId: string }>();
@@ -29,13 +30,20 @@ export default function Layout(props: { children: React.ReactNode }) {
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [companyId, setCompanyId] = useState<string | null>(null);
 
-  // Check if user is admin for this team
+  // Check if user is admin for this team and get company ID
   useEffect(() => {
     async function checkRole() {
       try {
         const adminStatus = await isCompanyAdmin(params.teamId);
         setIsAdmin(adminStatus);
+
+        // Get company ID for this team
+        const company = await getCompanyByTeamId(params.teamId);
+        if (company) {
+          setCompanyId(company.id);
+        }
       } catch (error) {
         console.error("Error checking admin status:", error);
       } finally {
@@ -91,25 +99,13 @@ export default function Layout(props: { children: React.ReactNode }) {
       icon: FolderTree,
       type: "item",
     },
-    // Company Management - Only for Admins
-    ...(isAdmin ? [
+    // Company Management - All users can view, admins can edit
+    ...(companyId ? [
       { type: "label" as const, name: "Company" },
       {
-        name: "Company Dashboard",
-        href: "/company",
+        name: "Company",
+        href: `/companies/${companyId}`,
         icon: Building2,
-        type: "item" as const,
-      },
-      {
-        name: "Company Settings",
-        href: "/company/settings",
-        icon: Settings2,
-        type: "item" as const,
-      },
-      {
-        name: "Role Management",
-        href: "/company/roles",
-        icon: Shield,
         type: "item" as const,
       },
     ] : []),

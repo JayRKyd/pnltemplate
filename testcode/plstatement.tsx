@@ -156,24 +156,33 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
     useEffect(() => {
       if (showInvoicesPopup && getCategoryExpensesFn && teamId) {
         setPopupLoading(true);
-        const monthIndex = showInvoicesPopup.monthIndex;
+        const visualIndex = showInvoicesPopup.monthIndex;
         
-        // All months are now from the selected calendar year
-        const year = parseInt(selectedYear);
-        const month = monthIndex + 1; // 1-12 (Jan=1, Dec=12)
+        // Convert visual index back to actual calendar month
+        // getOrderedMonthIndices() maps visual position -> actual month (0-indexed)
+        const orderedIndices = getOrderedMonthIndices();
+        const actualMonthZeroBased = orderedIndices[visualIndex]; // 0=Jan, 11=Dec
+        const now = new Date();
+        const currentMonth = now.getMonth(); // 0-11
+        const currentYearNum = now.getFullYear();
+        const viewingYear = parseInt(selectedYear);
+        // For rolling calendar: months after currentMonth are from previous year
+        let year = viewingYear;
+        if (viewingYear === currentYearNum && actualMonthZeroBased > currentMonth) {
+          year = viewingYear - 1;
+        }
+        const month = actualMonthZeroBased + 1; // 1-12 (Jan=1, Dec=12)
         
         getCategoryExpensesFn(teamId, showInvoicesPopup.category, year, month)
           .then(data => {
             console.log('Popup data received:', data);
             // Transform API data to match the expected format
             const transformed = data.map((exp: any) => {
-              // Handle date - use expense_date or accounting_period or fallback to current date
-              let dateStr = exp.expense_date || exp.accounting_period;
+              // Handle date - API returns 'date' field (mapped from expense_date)
+              let dateStr = exp.date || exp.expense_date || exp.accounting_period;
               let date;
               if (dateStr) {
-                // Try to parse the date
                 date = new Date(dateStr);
-                // Check if valid date
                 if (isNaN(date.getTime())) {
                   date = new Date();
                 }
@@ -182,30 +191,29 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
               }
               
               // Handle amount - ensure it's a valid number
-              const amount = typeof exp.total_amount === 'number' ? exp.total_amount : 
-                            typeof exp.amount === 'number' ? exp.amount :
-                            parseFloat(exp.total_amount) || parseFloat(exp.amount) || 0;
+              const amount = typeof exp.amount === 'number' ? exp.amount :
+                            parseFloat(exp.amount) || 0;
               
-              // Handle supplier - check multiple possible field names
-              const supplier = exp.supplier_name || exp.supplier || exp.furnizor || 'N/A';
+              // Handle supplier
+              const supplier = exp.supplier || exp.supplier_name || 'N/A';
               
               // Handle description
-              const description = exp.description || exp.descriere || '-';
+              const description = exp.description || '-';
               
               // Handle invoice number
-              const invoiceNumber = exp.invoice_number || exp.numar_factura || '-';
+              const invoiceNumber = exp.invoiceNumber || exp.invoice_number || exp.doc_number || '-';
               
               return {
                 id: exp.id,
-                date: date.toISOString(),
+                date: dateStr || date.toISOString().split('T')[0],
                 supplier: supplier,
                 description: description,
                 invoiceNumber: invoiceNumber,
                 amount: amount,
                 status: exp.status || 'Final',
-                category: exp.subcategory_name || exp.category_name || showInvoicesPopup.category,
-                subcategory: exp.subcategory_name,
-                type: exp.is_recurring ? 'recurente' : 'reale'
+                category: exp.category || showInvoicesPopup.category,
+                subcategory: exp.subcategory,
+                type: exp.type || (exp.is_recurring ? 'recurente' : 'reale')
               };
             });
             console.log('Transformed popup data:', transformed);
@@ -524,10 +532,27 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
     // Data from getPnlData(X) has structure: [X-1 Jan-Dec (0-11), X Jan-Dec (12-23)]
     // When viewing year X, we want indices 12-23 to show the CURRENT YEAR (X)
     const getYearData = (values: number[]) => {
-      // Get data for selected year (indices 12-23)
-      const yearData = values.slice(12, 24);
-      // Reorder according to rolling month order
+      const now = new Date();
+      const currentMonth = now.getMonth(); // 0-11
+      const currentYearNum = now.getFullYear();
+      const viewingYear = parseInt(selectedYear);
       const orderedIndices = getOrderedMonthIndices();
+
+      if (viewingYear === currentYearNum) {
+        // Rolling 12 months ending at current month:
+        // Months AFTER currentMonth in calendar → previous year (values[0-11])
+        // Months UP TO and INCLUDING currentMonth → current year (values[12-23])
+        return orderedIndices.map(monthIndex => {
+          if (monthIndex > currentMonth) {
+            return values[monthIndex] || 0;        // prevYear data
+          } else {
+            return values[monthIndex + 12] || 0;   // baseYear data
+          }
+        });
+      }
+
+      // Past years: show Jan-Dec of that year (indices 12-23)
+      const yearData = values.slice(12, 24);
       return orderedIndices.map(monthIndex => yearData[monthIndex] || 0);
     };
 
@@ -1177,7 +1202,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                                     {realInvoices.map(invoice => (
                                       <div key={invoice.id} className="grid grid-cols-[100px_200px_1fr_120px] gap-4 items-center group hover:bg-gray-50/50 py-4 border-b border-gray-100 last:border-0 transition-colors">
                                         <div className="text-sm text-gray-900">
-                                          {new Date(invoice.date).toLocaleDateString('ro-RO')}
+                                          {(() => { const p = (invoice.date || '').split('T')[0].split('-'); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : invoice.date; })()}
                                         </div>
                                         <div className="text-sm font-semibold text-gray-900">
                                           {invoice.supplier}
@@ -1203,7 +1228,7 @@ export const PLStatement = forwardRef<{ resetCategory: () => void }, PLStatement
                                     {recurrentInvoices.map(invoice => (
                                       <div key={invoice.id} className="grid grid-cols-[100px_200px_1fr_120px] gap-4 items-center group hover:bg-gray-50/50 py-4 border-b border-gray-100 last:border-0 transition-colors">
                                         <div className="text-sm text-gray-900">
-                                          {new Date(invoice.date).toLocaleDateString('ro-RO')}
+                                          {(() => { const p = (invoice.date || '').split('T')[0].split('-'); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : invoice.date; })()}
                                         </div>
                                         <div className="text-sm font-semibold text-gray-900">
                                           {invoice.supplier}

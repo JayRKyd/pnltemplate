@@ -31,7 +31,9 @@ export function UserDropdown({ colorModeToggle, teamId }: UserDropdownProps) {
   // Check if current user is a Super Admin
   useEffect(() => {
     const checkSuperAdmin = async () => {
+      console.log('[UserDropdown] Checking super admin status...');
       const result = await checkCurrentUserIsSuperAdmin();
+      console.log('[UserDropdown] Super admin result:', result);
       setIsSuperAdmin(result);
     };
     checkSuperAdmin();
@@ -62,7 +64,7 @@ export function UserDropdown({ colorModeToggle, teamId }: UserDropdownProps) {
   };
 
   const handleCompanii = () => {
-    router.push('/super-admin/dashboard');
+    router.push('/companies');
     setIsOpen(false);
   };
 

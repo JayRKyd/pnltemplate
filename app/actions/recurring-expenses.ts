@@ -391,6 +391,77 @@ export async function updateRecurringTemplateVersioned(
   return newTemplate;
 }
 
+// Migrate closed instance status from entire version chain to new template
+// Walks previous_version_id chain to find ALL closed instances from any ancestor
+// Call this AFTER generating instances for the new template
+export async function migrateClosedInstances(
+  oldTemplateId: string,
+  newTemplateId: string,
+  teamId: string
+): Promise<void> {
+  // Collect all ancestor template IDs by walking the version chain
+  const ancestorIds: string[] = [];
+  let currentId: string | null = oldTemplateId;
+  
+  while (currentId) {
+    ancestorIds.push(currentId);
+    const result: { data: { previous_version_id: string | null } | null } = await supabase
+      .from("team_recurring_expenses")
+      .select("previous_version_id")
+      .eq("id", currentId)
+      .single();
+    
+    currentId = result.data?.previous_version_id || null;
+    // Safety: prevent infinite loops
+    if (ancestorIds.length > 50) break;
+  }
+
+  if (ancestorIds.length === 0) return;
+
+  // Fetch all closed instances from any ancestor template
+  const { data: closedInstances } = await supabase
+    .from("recurring_instances")
+    .select("*")
+    .in("template_id", ancestorIds)
+    .eq("team_id", teamId)
+    .eq("status", "closed");
+
+  if (!closedInstances || closedInstances.length === 0) return;
+
+  // Deduplicate by year+month (keep the most recent closed instance)
+  const uniqueByMonth = new Map<string, typeof closedInstances[0]>();
+  for (const inst of closedInstances) {
+    const key = `${inst.instance_year}-${inst.instance_month}`;
+    // Keep the one with the latest closed_at
+    const existing = uniqueByMonth.get(key);
+    if (!existing || (inst.closed_at && (!existing.closed_at || inst.closed_at > existing.closed_at))) {
+      uniqueByMonth.set(key, inst);
+    }
+  }
+
+  const now = new Date().toISOString();
+  for (const oldInst of uniqueByMonth.values()) {
+    const { error } = await supabase
+      .from("recurring_instances")
+      .update({
+        status: "closed",
+        final_expense_id: oldInst.final_expense_id,
+        closed_at: oldInst.closed_at,
+        closed_by: oldInst.closed_by,
+        amount_difference_percent: oldInst.amount_difference_percent,
+        updated_at: now,
+      })
+      .eq("template_id", newTemplateId)
+      .eq("team_id", teamId)
+      .eq("instance_year", oldInst.instance_year)
+      .eq("instance_month", oldInst.instance_month);
+
+    if (error) {
+      console.error(`[migrateClosedInstances] Error migrating ${oldInst.instance_year}-${oldInst.instance_month}:`, error);
+    }
+  }
+}
+
 // Get version history for a template
 export async function getTemplateVersionHistory(
   templateId: string,
@@ -540,20 +611,46 @@ export async function getRecurringExpensesWithPayments(
     console.error("[getRecurringExpensesWithPayments] Expenses error:", expError);
   }
 
-  // Build payments map for each recurring expense
+  // Also fetch recurring_instances for accurate status (new system)
+  const { data: instances, error: instError } = await supabase
+    .from("recurring_instances")
+    .select("id, template_id, instance_year, instance_month, status")
+    .eq("team_id", teamId)
+    .in("template_id", recurringIds);
+
+  if (instError) {
+    console.error("[getRecurringExpensesWithPayments] Instances error:", instError);
+  }
+
+  // Build payments map using recurring_instances (authoritative source)
   const paymentsMap = new Map<string, Record<string, boolean>>();
-  
+  const monthKeys = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+  // First, populate from recurring_instances (new system - authoritative)
+  (instances || []).forEach(inst => {
+    if (!inst.template_id) return;
+    
+    const monthKey = monthKeys[inst.instance_month - 1]; // instance_month is 1-indexed
+    const yearMonthKey = `${inst.instance_year}-${monthKey}`;
+    
+    if (!paymentsMap.has(inst.template_id)) {
+      paymentsMap.set(inst.template_id, {});
+    }
+    
+    const payments = paymentsMap.get(inst.template_id)!;
+    // closed = green check (paid), open = red X (not paid)
+    payments[monthKey] = inst.status === 'closed';
+    payments[yearMonthKey] = inst.status === 'closed';
+  });
+
+  // Fallback: populate from team_expenses for templates without instances (legacy)
   (expenses || []).forEach(exp => {
     if (!exp.recurring_expense_id) return;
     
-    // Use getUTCMonth() and getUTCFullYear() to avoid timezone issues - dates are stored as YYYY-MM-DD (UTC)
-    const expenseDate = new Date(exp.expense_date + 'T00:00:00Z'); // Ensure UTC parsing
+    const expenseDate = new Date(exp.expense_date + 'T00:00:00Z');
     const month = expenseDate.getUTCMonth();
     const year = expenseDate.getUTCFullYear();
-    const monthKeys = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
     const monthKey = monthKeys[month];
-    
-    // Create a unique key that includes year to handle year boundaries
     const yearMonthKey = `${year}-${monthKey}`;
     
     if (!paymentsMap.has(exp.recurring_expense_id)) {
@@ -561,10 +658,11 @@ export async function getRecurringExpensesWithPayments(
     }
     
     const payments = paymentsMap.get(exp.recurring_expense_id)!;
-    // Only mark as paid if payment_status is 'paid'
-    // Store both the simple key (for backward compatibility) and year-specific key
-    payments[monthKey] = exp.payment_status === 'paid';
-    payments[yearMonthKey] = exp.payment_status === 'paid';
+    // Only set from legacy if not already set by instances
+    if (payments[yearMonthKey] === undefined) {
+      payments[monthKey] = exp.payment_status === 'paid';
+      payments[yearMonthKey] = exp.payment_status === 'paid';
+    }
   });
 
   // Combine data

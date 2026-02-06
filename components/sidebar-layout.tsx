@@ -153,9 +153,16 @@ function NavItem(props: {
   const segment = useSegment(props.basePath);
   const selected = segment === props.item.href;
 
+  // Check if href is an absolute path (starts with /)
+  // If it starts with /companies or other absolute paths, use as-is
+  // Otherwise, prepend basePath
+  const isAbsolutePath = props.item.href.startsWith('/companies') ||
+                         props.item.href.startsWith('/super-admin');
+  const finalHref = isAbsolutePath ? props.item.href : props.basePath + props.item.href;
+
   return (
     <Link
-      href={props.basePath + props.item.href}
+      href={finalHref}
       className={cn(
         buttonVariants({ variant: "ghost", size: "sm" }),
         selected && "bg-muted",

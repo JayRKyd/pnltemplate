@@ -7,12 +7,14 @@ import { getCategoryTree, CategoryWithChildren } from '@/app/actions/categories'
 import {
   getRecurringExpense,
   updateRecurringExpense,
+  updateRecurringTemplateVersioned,
+  migrateClosedInstances,
   RecurringExpense,
   deactivateRecurringExpense,
   reactivateRecurringExpense,
   deleteRecurringExpense
 } from '@/app/actions/recurring-expenses';
-import { RecurringInstance, getRecurringInstances } from '@/app/actions/recurring-instances';
+import { RecurringInstance, getRecurringInstances, generateMonthlyInstances } from '@/app/actions/recurring-instances';
 import { ConvertRecurringDialog } from '@/components/expenses/convert-recurring-dialog';
 import { useUser } from '@stackframe/stack';
 
@@ -58,14 +60,32 @@ export default function RecurringExpenseDetailPage() {
       setLoading(true);
       try {
         const currentYear = new Date().getFullYear();
-        const [expense, cats, loadedInstances] = await Promise.all([
+        const [expense, cats, initialInstances] = await Promise.all([
           getRecurringExpense(params.id),
           getCategoryTree(params.teamId),
           getRecurringInstances(params.id, params.teamId, currentYear)
         ]);
 
         setCategories(cats);
-        setInstances(loadedInstances);
+
+        // Auto-generate instances if none exist for this template
+        let finalInstances = initialInstances;
+        if (expense && expense.is_active && initialInstances.length === 0) {
+          try {
+            const startDate = new Date(expense.start_date);
+            for (let m = 0; m < 12; m++) {
+              const targetMonth = new Date(currentYear, m, 1);
+              if (targetMonth >= new Date(startDate.getFullYear(), startDate.getMonth(), 1)) {
+                await generateMonthlyInstances(params.teamId, targetMonth);
+              }
+            }
+            finalInstances = await getRecurringInstances(params.id, params.teamId, currentYear);
+          } catch (genError) {
+            console.error('Failed to auto-generate instances:', genError);
+          }
+        }
+
+        setInstances(finalInstances);
 
         if (expense) {
           setRecurringExpense(expense);
@@ -155,18 +175,47 @@ export default function RecurringExpenseDetailPage() {
     
     setSaving(true);
     try {
-      // Update the recurring expense
-      await updateRecurringExpense(params.id, params.teamId, {
+      const newAmountWithVat = parseAmount(sumaCuTVA) || undefined;
+      const newAmountWithoutVat = parseAmount(sumaFaraTVA) || undefined;
+      const newAmount = parseAmount(sumaFaraTVA) || parseAmount(sumaCuTVA);
+
+      // FR-8: Detect if amounts changed → use versioned update
+      const amountsChanged = 
+        (newAmountWithVat ?? 0) !== (recurringExpense.amount_with_vat ?? 0) ||
+        (newAmountWithoutVat ?? 0) !== (recurringExpense.amount_without_vat ?? 0);
+
+      const updatePayload = {
         supplier: numeFurnizor || undefined,
         description: descriere || undefined,
         tags: tags ? tags.split(',').map(t => t.trim()) : undefined,
         categoryId: cont || undefined,
         subcategoryId: subcont || undefined,
         vatDeductible: tvaDeductibil === 'Da',
-        amountWithVat: parseAmount(sumaCuTVA) || undefined,
-        amountWithoutVat: parseAmount(sumaFaraTVA) || undefined,
-        amount: parseAmount(sumaFaraTVA) || parseAmount(sumaCuTVA),
-      });
+        amountWithVat: newAmountWithVat,
+        amountWithoutVat: newAmountWithoutVat,
+        amount: newAmount,
+      };
+
+      if (amountsChanged) {
+        // Versioned update: deactivate old, create new template
+        const newTemplate = await updateRecurringTemplateVersioned(params.id, params.teamId, updatePayload);
+
+        // Generate instances for the new template
+        const currentYear = new Date().getFullYear();
+        const startDate = new Date(newTemplate.start_date);
+        for (let m = 0; m < 12; m++) {
+          const targetMonth = new Date(currentYear, m, 1);
+          if (targetMonth >= new Date(startDate.getFullYear(), startDate.getMonth(), 1)) {
+            await generateMonthlyInstances(params.teamId, targetMonth);
+          }
+        }
+
+        // Migrate closed instance status from old to new template
+        await migrateClosedInstances(params.id, newTemplate.id, params.teamId);
+      } else {
+        // Simple in-place update (no amount change)
+        await updateRecurringExpense(params.id, params.teamId, updatePayload);
+      }
       
       // Handle active/inactive status
       if (activeStatus === 'activ' && !recurringExpense.is_active) {
