@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Utilizatori } from '@/testcode/utilizatori';
 import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
+import { isCompanyAdmin } from '@/app/actions/permissions';
 
 interface UserDropdownProps {
   colorModeToggle?: () => void;
@@ -27,17 +28,22 @@ export function UserDropdown({ colorModeToggle, teamId }: UserDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showUtilizatori, setShowUtilizatori] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [showCompanii, setShowCompanii] = useState(false);
 
-  // Check if current user is a Super Admin
+  // Check if current user is a Super Admin or Company Admin
   useEffect(() => {
-    const checkSuperAdmin = async () => {
-      console.log('[UserDropdown] Checking super admin status...');
-      const result = await checkCurrentUserIsSuperAdmin();
-      console.log('[UserDropdown] Super admin result:', result);
-      setIsSuperAdmin(result);
+    const checkRoles = async () => {
+      const superResult = await checkCurrentUserIsSuperAdmin();
+      setIsSuperAdmin(superResult);
+      if (superResult) {
+        setShowCompanii(true);
+      } else if (teamId) {
+        const adminResult = await isCompanyAdmin(teamId);
+        setShowCompanii(adminResult);
+      }
     };
-    checkSuperAdmin();
-  }, []);
+    checkRoles();
+  }, [teamId]);
 
   const handleThemeToggle = () => {
     if (colorModeToggle) {
@@ -148,8 +154,8 @@ export function UserDropdown({ colorModeToggle, teamId }: UserDropdownProps) {
                   Team Members
                 </button>
 
-                {/* Companii - Super Admin Only */}
-                {isSuperAdmin && (
+                {/* Companii - Super Admin & Company Admin */}
+                {showCompanii && (
                   <button
                     onClick={handleCompanii}
                     className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
