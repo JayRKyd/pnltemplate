@@ -180,24 +180,52 @@ export async function getCompanyByTeamId(teamId: string): Promise<Company | null
 /**
  * Get the current user's companies (server-side, bypasses RLS)
  * Returns all companies + roles for the current authenticated user
+ * Includes companies from active team_memberships AND pending whitelist invites
  */
 export async function getMyCompanies(): Promise<{ company: Company; role: string }[]> {
   const currentUser = await stackServerApp.getUser();
   if (!currentUser) return [];
 
-  // Find the user's team memberships
-  const { data: memberships, error: memError } = await supabaseAdmin
+  // Collect team IDs from two sources
+  const teamRoleMap = new Map<string, string>();
+
+  // 1. Active team memberships
+  const { data: memberships } = await supabaseAdmin
     .from("team_memberships")
     .select("team_id, role")
     .eq("user_id", currentUser.id);
 
-  if (memError || !memberships || memberships.length === 0) {
-    console.log("[getMyCompanies] No memberships found for user:", currentUser.id);
+  if (memberships) {
+    for (const m of memberships) {
+      teamRoleMap.set(m.team_id, m.role);
+    }
+  }
+
+  // 2. Pending whitelist invites (by email)
+  const userEmail = currentUser.primaryEmail;
+  if (userEmail) {
+    const { data: invites } = await supabaseAdmin
+      .from("user_whitelist")
+      .select("team_id, role")
+      .eq("email", userEmail)
+      .eq("status", "pending");
+
+    if (invites) {
+      for (const inv of invites) {
+        if (!teamRoleMap.has(inv.team_id)) {
+          teamRoleMap.set(inv.team_id, inv.role || "member");
+        }
+      }
+    }
+  }
+
+  if (teamRoleMap.size === 0) {
+    console.log("[getMyCompanies] No memberships or invites for user:", currentUser.id);
     return [];
   }
 
-  // Check each team for an associated company
-  const teamIds = memberships.map(m => m.team_id);
+  // Find companies for all collected team IDs
+  const teamIds = Array.from(teamRoleMap.keys());
   const { data: companies, error: compError } = await supabaseAdmin
     .from("companies")
     .select("*")
@@ -210,8 +238,8 @@ export async function getMyCompanies(): Promise<{ company: Company; role: string
 
   // Return all companies with roles
   return companies.map(company => {
-    const membership = memberships.find(m => m.team_id === company.team_id);
-    return { company, role: membership?.role || "member" };
+    const role = teamRoleMap.get(company.team_id) || "member";
+    return { company, role };
   });
 }
 
@@ -593,7 +621,7 @@ export async function getCompanyTeamMembers(
   if (!currentUser) return [];
 
   // Get company to find team_id
-  const { data: company } = await supabase
+  const { data: company } = await supabaseAdmin
     .from("companies")
     .select("team_id")
     .eq("id", companyId)
@@ -604,7 +632,7 @@ export async function getCompanyTeamMembers(
   // Check permissions - Super Admin or team member
   const isSuper = await isSuperAdmin(currentUser.id);
   if (!isSuper) {
-    const { data: membership } = await supabase
+    const { data: membership } = await supabaseAdmin
       .from("team_memberships")
       .select("role")
       .eq("team_id", company.team_id)
@@ -615,7 +643,7 @@ export async function getCompanyTeamMembers(
   }
 
   // Use team_members_with_profiles view - this joins memberships with stack_users
-  const { data: viewMembers, error: viewError } = await supabase
+  const { data: viewMembers, error: viewError } = await supabaseAdmin
     .from("team_members_with_profiles")
     .select("membership_id, user_id, email, name, avatar_url, role, joined_at, is_active")
     .eq("team_id", company.team_id);
@@ -626,7 +654,7 @@ export async function getCompanyTeamMembers(
   }
 
   // Get list of super-admin user IDs to exclude them from company user lists
-  const { data: superAdmins } = await supabase
+  const { data: superAdmins } = await supabaseAdmin
     .from("super_admins")
     .select("user_id");
   const superAdminIds = new Set((superAdmins || []).map(sa => sa.user_id));
@@ -646,7 +674,7 @@ export async function getCompanyTeamMembers(
   }));
 
   // Also get pending invites from user_whitelist
-  const { data: pendingInvites } = await supabase
+  const { data: pendingInvites } = await supabaseAdmin
     .from("user_whitelist")
     .select("id, email, full_name, role, created_at")
     .eq("team_id", company.team_id)
@@ -1367,9 +1395,12 @@ export async function updateCompanyUser(
     }
   }
 
-  // Update whitelist entry
+  // Update whitelist entry (both role and access_level columns)
   const whitelistUpdates: Record<string, string> = {};
-  if (updates.role) whitelistUpdates.access_level = updates.role;
+  if (updates.role) {
+    whitelistUpdates.access_level = updates.role;
+    whitelistUpdates.role = updates.role;
+  }
   if (updates.fullName !== undefined) whitelistUpdates.full_name = updates.fullName;
 
   if (Object.keys(whitelistUpdates).length > 0) {
