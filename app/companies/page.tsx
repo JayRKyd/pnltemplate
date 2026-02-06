@@ -17,6 +17,7 @@ import {
   getCompanyByTeamId
 } from '@/app/actions/companies';
 import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
+import { isCompanyAdmin } from '@/app/actions/permissions';
 
 export default function CompaniesPage() {
   const router = useRouter();
@@ -24,6 +25,7 @@ export default function CompaniesPage() {
   const [companies, setCompanies] = useState<CompanyWithUsers[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Users modal state
   const [usersModalOpen, setUsersModalOpen] = useState(false);
@@ -209,24 +211,34 @@ export default function CompaniesPage() {
   useEffect(() => {
     const init = async () => {
       const isSuper = await checkCurrentUserIsSuperAdmin();
-      if (!isSuper) {
-        // Non-super-admins: redirect to their own company page if they have one
-        const selectedTeamId = selectedTeam?.id;
-        if (selectedTeamId) {
+      if (isSuper) {
+        setIsSuperAdmin(true);
+        setIsAdmin(true);
+        const data = await getCompanies();
+        setCompanies(data);
+        setLoading(false);
+        return;
+      }
+
+      // Non-super-admin: check if company admin for their team
+      const selectedTeamId = selectedTeam?.id;
+      if (selectedTeamId) {
+        const adminStatus = await isCompanyAdmin(selectedTeamId);
+        if (adminStatus) {
+          setIsAdmin(true);
+          // Load only their own company with member count
           const myCompany = await getCompanyByTeamId(selectedTeamId);
           if (myCompany) {
-            router.replace(`/companies/${myCompany.id}`);
+            const members = await getCompanyTeamMembers(myCompany.id);
+            setCompanies([{ ...myCompany, user_count: members.length } as CompanyWithUsers]);
+            setLoading(false);
             return;
           }
         }
-        // Fallback: redirect to team dashboard
-        router.replace(selectedTeamId ? `/dashboard/${selectedTeamId}` : '/');
-        return;
       }
-      setIsSuperAdmin(true);
-      const data = await getCompanies();
-      setCompanies(data);
-      setLoading(false);
+
+      // Regular user or no company — redirect
+      router.replace(selectedTeamId ? `/dashboard/${selectedTeamId}` : '/');
     };
     init();
   }, [router, selectedTeam]);
@@ -242,7 +254,7 @@ export default function CompaniesPage() {
     );
   }
 
-  if (!isSuperAdmin) {
+  if (!isAdmin) {
     return null;
   }
 
@@ -274,16 +286,18 @@ export default function CompaniesPage() {
         <div className="max-w-5xl mx-auto">
           {/* Card */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            {/* Card Header with Add Button */}
-            <div className="flex justify-end px-6 py-5">
-              <button
-                onClick={() => router.push('/companies/new')}
-                className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-[#00C9A7] to-[#00D4AA] text-white rounded-full font-medium hover:opacity-90 transition-all text-sm"
-              >
-                <Plus size={16} />
-                Adauga companie
-              </button>
-            </div>
+            {/* Card Header with Add Button - Super Admin only */}
+            {isSuperAdmin && (
+              <div className="flex justify-end px-6 py-5">
+                <button
+                  onClick={() => router.push('/companies/new')}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-[#00C9A7] to-[#00D4AA] text-white rounded-full font-medium hover:opacity-90 transition-all text-sm"
+                >
+                  <Plus size={16} />
+                  Adauga companie
+                </button>
+              </div>
+            )}
 
             {/* Table */}
             <div className="px-6 pb-6">
