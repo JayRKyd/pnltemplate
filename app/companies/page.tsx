@@ -14,7 +14,7 @@ import {
   updateCompanyUser,
   toggleUserActive,
   removeCompanyUser,
-  getMyCompany
+  getMyCompanies
 } from '@/app/actions/companies';
 import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
 
@@ -222,14 +222,20 @@ export default function CompaniesPage() {
         return;
       }
 
-      // Non-super-admin: server-side lookup of user's company
-      const result = await getMyCompany();
-      if (result) {
+      // Non-super-admin: server-side lookup of user's companies
+      const results = await getMyCompanies();
+      if (results.length > 0) {
         setHasAccess(true);
-        setIsAdmin(result.role === 'admin');
-        // Load member count
-        const members = await getCompanyTeamMembers(result.company.id);
-        setCompanies([{ ...result.company, user_count: members.length } as CompanyWithUsers]);
+        // Admin if admin in any company
+        setIsAdmin(results.some(r => r.role === 'admin'));
+        // Load member counts for each company
+        const companiesWithCounts = await Promise.all(
+          results.map(async (r) => {
+            const members = await getCompanyTeamMembers(r.company.id);
+            return { ...r.company, user_count: members.length } as CompanyWithUsers;
+          })
+        );
+        setCompanies(companiesWithCounts);
         setLoading(false);
         return;
       }

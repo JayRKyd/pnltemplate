@@ -178,12 +178,12 @@ export async function getCompanyByTeamId(teamId: string): Promise<Company | null
 }
 
 /**
- * Get the current user's company (server-side, bypasses RLS)
- * Returns the company + role for the current authenticated user
+ * Get the current user's companies (server-side, bypasses RLS)
+ * Returns all companies + roles for the current authenticated user
  */
-export async function getMyCompany(): Promise<{ company: Company; role: string } | null> {
+export async function getMyCompanies(): Promise<{ company: Company; role: string }[]> {
   const currentUser = await stackServerApp.getUser();
-  if (!currentUser) return null;
+  if (!currentUser) return [];
 
   // Find the user's team memberships
   const { data: memberships, error: memError } = await supabaseAdmin
@@ -192,8 +192,8 @@ export async function getMyCompany(): Promise<{ company: Company; role: string }
     .eq("user_id", currentUser.id);
 
   if (memError || !memberships || memberships.length === 0) {
-    console.log("[getMyCompany] No memberships found for user:", currentUser.id);
-    return null;
+    console.log("[getMyCompanies] No memberships found for user:", currentUser.id);
+    return [];
   }
 
   // Check each team for an associated company
@@ -204,14 +204,15 @@ export async function getMyCompany(): Promise<{ company: Company; role: string }
     .in("team_id", teamIds);
 
   if (compError || !companies || companies.length === 0) {
-    console.log("[getMyCompany] No companies found for teams:", teamIds);
-    return null;
+    console.log("[getMyCompanies] No companies found for teams:", teamIds);
+    return [];
   }
 
-  // Return first company found with the user's role in that team
-  const company = companies[0];
-  const membership = memberships.find(m => m.team_id === company.team_id);
-  return { company, role: membership?.role || "member" };
+  // Return all companies with roles
+  return companies.map(company => {
+    const membership = memberships.find(m => m.team_id === company.team_id);
+    return { company, role: membership?.role || "member" };
+  });
 }
 
 /**
@@ -1341,7 +1342,7 @@ export async function updateCompanyUser(
   }
 
   // Get company
-  const { data: company } = await supabase
+  const { data: company } = await supabaseAdmin
     .from("companies")
     .select("team_id")
     .eq("id", companyId)
@@ -1354,7 +1355,7 @@ export async function updateCompanyUser(
   // Check permissions
   const isSuper = await isSuperAdmin(currentUser.id);
   if (!isSuper) {
-    const { data: membership } = await supabase
+    const { data: membership } = await supabaseAdmin
       .from("team_memberships")
       .select("role")
       .eq("team_id", company.team_id)
@@ -1372,7 +1373,7 @@ export async function updateCompanyUser(
   if (updates.fullName !== undefined) whitelistUpdates.full_name = updates.fullName;
 
   if (Object.keys(whitelistUpdates).length > 0) {
-    const { error: wlError } = await supabase
+    const { error: wlError } = await supabaseAdmin
       .from("user_whitelist")
       .update(whitelistUpdates)
       .eq("id", memberId)
@@ -1385,14 +1386,14 @@ export async function updateCompanyUser(
 
   // Also update team_memberships role if user is active
   if (updates.role) {
-    const { data: wlEntry } = await supabase
+    const { data: wlEntry } = await supabaseAdmin
       .from("user_whitelist")
       .select("user_id")
       .eq("id", memberId)
       .single();
 
     if (wlEntry?.user_id) {
-      await supabase
+      await supabaseAdmin
         .from("team_memberships")
         .update({ role: updates.role })
         .eq("team_id", company.team_id)

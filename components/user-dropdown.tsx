@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Utilizatori } from '@/testcode/utilizatori';
 import { checkCurrentUserIsSuperAdmin } from '@/app/actions/super-admin';
-import { getMyCompany } from '@/app/actions/companies';
+import { getMyCompanies } from '@/app/actions/companies';
 
 interface UserDropdownProps {
   colorModeToggle?: () => void;
@@ -39,8 +39,8 @@ export function UserDropdown({ colorModeToggle, teamId }: UserDropdownProps) {
         setShowCompanii(true);
       } else {
         // Server-side check: does user belong to a team with a company?
-        const result = await getMyCompany();
-        setShowCompanii(!!result);
+        const results = await getMyCompanies();
+        setShowCompanii(results.length > 0);
       }
     };
     checkRoles();
