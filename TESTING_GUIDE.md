@@ -109,7 +109,7 @@ curl http://localhost:3000/api/cron/generate-recurring
 ### Test 5.3 — DB Function Directly
 
 ```sql
-SELECT * FROM generate_all_recurring_forms(DATE_TRUNC('month', CURRENT_DATE));
+SELECT * FROM generate_all_recurring_forms(DATE_TRUNC('month', CURRENT_DATE)::DATE);
 ```
 
 **Expected:** Returns rows with `(team_id, generated_count)` for any teams that got new forms.

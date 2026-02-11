@@ -14,11 +14,10 @@ DECLARE
   v_month INTEGER;
   v_existing_count INTEGER;
   v_month_label TEXT;
-  v_ro_months TEXT[] := ARRAY['ianuarie','februarie','martie','aprilie','mai','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie'];
 BEGIN
   v_year := EXTRACT(YEAR FROM p_target_month)::INTEGER;
   v_month := EXTRACT(MONTH FROM p_target_month)::INTEGER;
-  v_month_label := v_ro_months[v_month] || ' ' || v_year::TEXT;
+  v_month_label := v_year::TEXT || '-' || LPAD(v_month::TEXT, 2, '0');
 
   -- Loop through all active, non-superseded recurring templates for this team
   FOR v_template IN

@@ -632,12 +632,13 @@ export default function ExpensesPage() {
 
       if (exp.recurring_expense_id) {
         // This is a recurring-linked expense
-        if (exp.is_recurring_placeholder || exp.status === 'placeholder' || exp.status === 'recurent') {
-          displayStatus = 'Recurent';
-        } else if (exp.payment_status === 'paid' || exp.status === 'approved' || exp.status === 'paid') {
+        // Check actual DB status first — is_recurring_placeholder should not override draft/final
+        if (exp.status === 'draft') {
+          displayStatus = 'Draft';
+        } else if (exp.status === 'approved' || exp.status === 'paid' || exp.status === 'final' || exp.payment_status === 'paid') {
           displayStatus = 'Final';
         } else {
-          displayStatus = exp.status === 'draft' ? 'Draft' : 'Recurent';
+          displayStatus = 'Recurent';
         }
       } else {
         // Regular expense (not recurring)
