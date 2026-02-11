@@ -84,7 +84,13 @@ function PaymentIcon({ paid }: { paid: boolean }) {
   );
 }
 
-function MonthPaymentIcon({ paid }: { paid: boolean }) {
+function MonthPaymentIcon({ paid, exists }: { paid: boolean; exists: boolean }) {
+  if (!exists) {
+    // No RE-Form for this month — dashed circle
+    return (
+      <div style={{ width: '28px', height: '28px', borderRadius: '50%', border: '2px dashed rgba(209, 213, 220, 0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+    );
+  }
   if (paid) {
     return (
       <div className="w-7 h-7 rounded-full bg-[#D1FAE5] flex items-center justify-center">
@@ -446,10 +452,10 @@ export default function ExpensesPage() {
       
       // Apply recurring filter client-side if selected
       if (selectedStatus === 'recurring') {
-        // Filter for recurring placeholders that are not yet marked as paid (Recurent status)
+        // Only show expenses whose actual DB status is still 'recurent'
         filteredData = filteredData.filter(exp => 
           exp.recurring_expense_id !== null && 
-          (exp.is_recurring_placeholder === true || exp.status === 'placeholder' || exp.status === 'recurent') &&
+          exp.status === 'recurent' &&
           exp.payment_status !== 'paid'
         );
       }
@@ -1600,21 +1606,23 @@ export default function ExpensesPage() {
                           // Check both year-specific key and simple English key (backend stores both)
                           const isPaid = payments[yearMonthKey] ?? payments[englishMonthKey] ?? false;
                           
+                          const expenseIds = (expense as any).expenseIds as Record<string, string> | undefined;
+                          const yearExpKey = `${monthInfo.year}-${englishMonthKey}`;
+                          const expId = expenseIds?.[yearExpKey] ?? expenseIds?.[englishMonthKey];
+                          const hasExpense = !!expId;
+                          
                           return (
                             <td key={`${monthInfo.year}-${monthInfo.index}-${idx}`} style={{ width: '81.8px' }}>
                               <div 
-                                style={{ display: 'flex', justifyContent: 'center', cursor: 'pointer' }}
+                                style={{ display: 'flex', justifyContent: 'center', cursor: hasExpense ? 'pointer' : 'default' }}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  // Navigate to expense form for this RE-Form
-                                  const expenseIds = (expense as any).expenseIds as Record<string, string> | undefined;
-                                  const expId = expenseIds?.[englishMonthKey];
                                   if (expId) {
                                     router.push(`/dashboard/${params.teamId}/expenses/${expId}`);
                                   }
                                 }}
                               >
-                                <MonthPaymentIcon paid={isPaid} />
+                                <MonthPaymentIcon paid={isPaid} exists={hasExpense} />
                               </div>
                             </td>
                           );

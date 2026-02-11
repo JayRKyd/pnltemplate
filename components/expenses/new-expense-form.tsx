@@ -1170,10 +1170,19 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
           boxSizing: 'border-box'
         }}>
           <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
-            {/* RE-Form Badge */}
-            {isRecurringForm && (
-              <span style={{ padding: '4px 12px', backgroundColor: 'rgba(240, 253, 250, 1)', border: '1px solid rgba(13, 148, 136, 0.3)', borderRadius: '9999px', fontSize: '12px', fontWeight: 600, color: 'rgba(13, 148, 136, 1)', whiteSpace: 'nowrap' }}>Recurent</span>
-            )}
+            {/* RE-Form Badge - show actual status */}
+            {isRecurringForm && (() => {
+              const expStatus = originalExpenseStatus;
+              const label = expStatus === 'draft' ? 'Draft' : expStatus === 'approved' || expStatus === 'final' ? 'Final' : 'Recurent';
+              const badgeStyles = label === 'Draft'
+                ? { backgroundColor: 'rgba(255, 247, 196, 1)', borderColor: 'rgba(255, 209, 111, 0.3)', color: 'rgba(161, 120, 0, 1)' }
+                : label === 'Final'
+                ? { backgroundColor: 'rgba(192, 245, 229, 1)', borderColor: 'rgba(122, 231, 201, 0.3)', color: 'rgba(5, 150, 105, 1)' }
+                : { backgroundColor: 'rgba(255, 224, 238, 1)', borderColor: 'rgba(255, 179, 217, 0.3)', color: 'rgba(190, 24, 93, 1)' };
+              return (
+                <span style={{ padding: '4px 12px', backgroundColor: badgeStyles.backgroundColor, border: `1px solid ${badgeStyles.borderColor}`, borderRadius: '9999px', fontSize: '12px', fontWeight: 600, color: badgeStyles.color, whiteSpace: 'nowrap' }}>{label}</span>
+              );
+            })()}
             {/* Supplier Search */}
             <div style={{ position: 'relative' }} data-supplier-dropdown>
               <img src="https://storage.googleapis.com/storage.magicpath.ai/user/365266140869578752/figma-assets/199be80d-8f1c-421a-8a15-baed1b4f7d0a.svg" alt="Search" style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', zIndex: 1 }} />

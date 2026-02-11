@@ -762,8 +762,11 @@ export async function getRecurringExpensesWithPayments(
     // X = status is 'recurent' (not yet touched by user)
     // ✓ = status is 'draft' or 'final' (user has edited/finalized)
     const isDone = exp.status === 'draft' || exp.status === 'final';
+    const yearMonthKey = `${year}-${monthKey}`;
     payments[monthKey] = isDone;
+    payments[yearMonthKey] = isDone;
     ids[monthKey] = exp.id;
+    ids[yearMonthKey] = exp.id;
   });
 
   // Combine data
