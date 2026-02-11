@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { X, ChevronDown, Check } from 'lucide-react';
 import { getCategoryTree, CategoryWithChildren } from '@/app/actions/categories';
-import { createRecurringExpense, updateRecurringPaymentStatus } from '@/app/actions/recurring-expenses';
+import { createRecurringExpense, updateRecurringPaymentStatus, generateRecurringForms } from '@/app/actions/recurring-expenses';
 
 interface MonthPayment {
   month: string;
@@ -141,6 +141,19 @@ export default function NewRecurringExpensePage() {
         startDate: new Date().toISOString().split('T')[0],
       });
       
+      // Generate RE-Forms for the current month (and any past months from start_date)
+      const now = new Date();
+      const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const startDate = new Date(recurring.start_date);
+      const startMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      for (let d = new Date(startMonth); d <= currentMonth; d.setMonth(d.getMonth() + 1)) {
+        try {
+          await generateRecurringForms(params.teamId, new Date(d));
+        } catch (genErr) {
+          console.error('Failed to generate RE-Form for', d, genErr);
+        }
+      }
+
       // Save payment status for each toggled month
       const currentYear = new Date().getFullYear();
       for (const mp of monthlyPayments) {

@@ -12,6 +12,8 @@ import { getTagSuggestions, TagSuggestion } from "@/app/actions/tags";
 import { validateTags } from "@/lib/utils/tags";
 import { checkForDuplicates } from "@/app/actions/duplicate-detection";
 import { PotentialDuplicate, formatDuplicateWarning } from "@/lib/utils/duplicate-detection";
+import { AmountDifferenceDialog } from "@/components/expenses/amount-difference-dialog";
+import { getRecurringExpense, updateRecurringTemplateVersioned } from "@/app/actions/recurring-expenses";
 
 // Updated doc types as per spec
 const DOC_TYPES = ["Bon", "Factura", "eFactura", "Chitanta", "Altceva"];
@@ -192,6 +194,16 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   const [loadingExpense, setLoadingExpense] = useState(!!expenseId);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // RE-Form mode: when editing a recurring expense form, certain fields are locked
+  const [isRecurringForm, setIsRecurringForm] = useState(false);
+  const [recurringTemplateId, setRecurringTemplateId] = useState<string | null>(null);
+  const [originalExpenseStatus, setOriginalExpenseStatus] = useState<string | null>(null);
+  const [templateExpectedAmount, setTemplateExpectedAmount] = useState<number | null>(null);
+
+  // §11: Amount difference dialog (±10% from RE-Template)
+  const [showAmountDiffDialog, setShowAmountDiffDialog] = useState(false);
+  const [amountDiffData, setAmountDiffData] = useState<{ expected: number; actual: number; percent: number } | null>(null);
+
   // Header fields
   const [furnizor, setFurnizor] = useState("");
   const [furnizorCui, setFurnizorCui] = useState("");
@@ -365,6 +377,20 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         const attachmentResults = await Promise.all(attachmentPromises);
         const attachmentFiles = attachmentResults.filter((file): file is NonNullable<typeof file> => file !== null);
         setUploadedFiles(attachmentFiles);
+
+        // Detect RE-Form mode (expense linked to a recurring template)
+        if (expense.recurring_expense_id) {
+          setIsRecurringForm(true);
+          setRecurringTemplateId(expense.recurring_expense_id);
+          setOriginalExpenseStatus(expense.status);
+          // Fetch RE-Template expected amount for §11 (±10% check)
+          try {
+            const template = await getRecurringExpense(expense.recurring_expense_id);
+            if (template) {
+              setTemplateExpectedAmount(template.amount_with_vat ?? template.amount ?? 0);
+            }
+          } catch { /* template may be deleted/inactive, skip */ }
+        }
 
         // Populate header fields
         setFurnizor(expense.supplier || "");
@@ -903,8 +929,21 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         console.warn("Some attachments failed to upload. Expense saved but attachments may be missing.");
       }
 
-      // Status is already set correctly (recurent or draft)
-      // PLATA toggle will change status to final when clicked by user
+      // §11: Check for ±10% amount difference when RE-Form transitions from Recurent
+      const isRecurentTransition = isRecurringForm && recurringTemplateId && 
+        (originalExpenseStatus === 'recurent' || originalExpenseStatus === 'placeholder');
+      
+      if (isRecurentTransition && templateExpectedAmount && templateExpectedAmount > 0) {
+        const actualAmount = parseAmount(lines[0].sumaCuTVA) || parseAmount(lines[0].sumaFaraTVA) || 0;
+        if (actualAmount > 0) {
+          const diffPercent = Math.abs((actualAmount - templateExpectedAmount) / templateExpectedAmount * 100);
+          if (diffPercent > 10) {
+            setAmountDiffData({ expected: templateExpectedAmount, actual: actualAmount, percent: diffPercent });
+            setShowAmountDiffDialog(true);
+            return; // Don't show success yet — wait for user decision
+          }
+        }
+      }
 
       setShowSuccessModal(true);
     } catch (err) {
@@ -925,6 +964,36 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
       setTimeout(() => handleSave(lastSaveAttempt.forceDraft), 100);
     }
   }, [lastSaveAttempt]);
+
+  // §11: Handle amount difference dialog actions
+  const handleAmountDiffConfirm = () => {
+    // User chose to keep the amount without updating the template
+    setShowAmountDiffDialog(false);
+    setAmountDiffData(null);
+    setShowSuccessModal(true);
+  };
+
+  const handleAmountDiffUpdateTemplate = async () => {
+    if (!recurringTemplateId || !amountDiffData) return;
+    try {
+      setLoading(true);
+      await updateRecurringTemplateVersioned(recurringTemplateId, teamId, {
+        amount: amountDiffData.actual,
+        amountWithVat: amountDiffData.actual,
+      });
+      setShowAmountDiffDialog(false);
+      setAmountDiffData(null);
+      setShowSuccessModal(true);
+    } catch (err) {
+      console.error('Failed to update template:', err);
+      // Still show success for the expense save itself
+      setShowAmountDiffDialog(false);
+      setAmountDiffData(null);
+      setShowSuccessModal(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Get subcategories for a selected parent category
   const getSubcategoriesForCategory = (categoryId: string): CategoryWithChildren[] => {
@@ -1028,6 +1097,19 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         </div>
       )}
 
+      {/* §11: Amount difference dialog (±10% from RE-Template) */}
+      {amountDiffData && (
+        <AmountDifferenceDialog
+          isOpen={showAmountDiffDialog}
+          onClose={handleAmountDiffConfirm}
+          expectedAmount={amountDiffData.expected}
+          actualAmount={amountDiffData.actual}
+          differencePercent={amountDiffData.percent}
+          onConfirm={handleAmountDiffConfirm}
+          onUpdateTemplate={handleAmountDiffUpdateTemplate}
+        />
+      )}
+
       {/* Validation Error Toast */}
       {validationError && (
         <div style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 100, backgroundColor: 'rgba(254, 226, 226, 1)', border: '1px solid rgba(252, 165, 165, 1)', borderRadius: '12px', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -1088,6 +1170,10 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
           boxSizing: 'border-box'
         }}>
           <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+            {/* RE-Form Badge */}
+            {isRecurringForm && (
+              <span style={{ padding: '4px 12px', backgroundColor: 'rgba(240, 253, 250, 1)', border: '1px solid rgba(13, 148, 136, 0.3)', borderRadius: '9999px', fontSize: '12px', fontWeight: 600, color: 'rgba(13, 148, 136, 1)', whiteSpace: 'nowrap' }}>Recurent</span>
+            )}
             {/* Supplier Search */}
             <div style={{ position: 'relative' }} data-supplier-dropdown>
               <img src="https://storage.googleapis.com/storage.magicpath.ai/user/365266140869578752/figma-assets/199be80d-8f1c-421a-8a15-baed1b4f7d0a.svg" alt="Search" style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', zIndex: 1 }} />
@@ -1108,7 +1194,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                 }}
               />
               {searchingSupplier && <Loader2 size={14} className="animate-spin" style={{ position: 'absolute', right: '12px', top: '13px', color: 'rgba(156, 163, 175, 1)' }} />}
-              {furnizorLocked && (
+              {furnizorLocked && !isRecurringForm && (
                 <button onClick={handleSupplierUnlock} style={{ ...buttonBaseStyle, position: 'absolute', right: '12px', top: '12px', background: 'none', padding: '2px' }}>
                   <X size={14} style={{ color: 'rgba(156, 163, 175, 1)' }} />
                 </button>
@@ -1372,7 +1458,9 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                     <label style={{ width: '128px', color: 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Luna P&L</label>
                     <div style={{ position: 'relative', width: '296px' }}>
                       <button 
+                        disabled={isRecurringForm}
                         onClick={() => {
+                          if (isRecurringForm) return;
                           if (openMonthPickerIndex === index) {
                             setOpenMonthPickerIndex(-1);
                           } else {
@@ -1384,7 +1472,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                             setOpenMonthPickerIndex(index);
                           }
                         }}
-                        style={{ ...buttonBaseStyle, width: '100%', height: '36px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 16px', backgroundColor: 'white', border: '1px solid rgba(209, 213, 220, 0.5)', borderRadius: '9999px', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)' }}
+                        style={{ ...buttonBaseStyle, width: '100%', height: '36px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 16px', backgroundColor: isRecurringForm ? 'rgba(243, 244, 246, 0.5)' : 'white', border: '1px solid rgba(209, 213, 220, 0.5)', borderRadius: '9999px', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)', cursor: isRecurringForm ? 'not-allowed' : 'pointer', opacity: isRecurringForm ? 0.7 : 1 }}
                       >
                         <span style={{ color: 'rgba(16, 24, 40, 1)', fontSize: '14px' }}>{line.lunaP}</span>
                         <ChevronDown size={18} style={{ color: 'rgba(156, 163, 175, 1)' }} />
@@ -1465,6 +1553,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                     <div style={{ position: 'relative', width: '296px' }}>
                       <select 
                         value={line.categoryId} 
+                        disabled={isRecurringForm}
                         onChange={(e) => {
                           updateLine(index, "categoryId", e.target.value);
                           updateLine(index, "subcategoryId", "");
@@ -1473,12 +1562,12 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                           width: '100%', 
                           height: '36px', 
                           padding: '0 32px 0 16px', 
-                          backgroundColor: hasFieldError(index, 'categoryId') ? errorBgStyle : 'white', 
+                          backgroundColor: isRecurringForm ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'categoryId') ? errorBgStyle : 'white', 
                           border: `1px solid ${hasFieldError(index, 'categoryId') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'}`, 
                           borderRadius: '9999px', 
                           fontSize: '14px', 
                           appearance: 'none', 
-                          cursor: 'pointer', 
+                          cursor: isRecurringForm ? 'not-allowed' : 'pointer', 
                           outline: 'none', 
                           color: hasFieldError(index, 'categoryId') ? errorTextStyle : line.categoryId ? 'rgba(16, 24, 40, 1)' : 'rgba(153, 161, 175, 1)' 
                         }}
@@ -1499,7 +1588,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                       <select 
                         value={line.subcategoryId} 
                         onChange={(e) => updateLine(index, "subcategoryId", e.target.value)}
-                        disabled={!line.categoryId}
+                        disabled={isRecurringForm || !line.categoryId}
                         style={{ 
                           width: '100%', 
                           height: '36px', 

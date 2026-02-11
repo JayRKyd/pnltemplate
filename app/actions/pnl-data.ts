@@ -3,14 +3,10 @@
 import { supabase } from "@/lib/supabase";
 import { unstable_cache } from "next/cache";
 
-// Helper to build expense list with instance/final logic
-// P&L shows exactly ONE value per month per template:
-// - If instance is closed: show final expense
-// - If instance is open: show expected amount from instance
-// - Regular expenses: show as normal
+// Helper to build expense list for P&L
+// All expenses (including RE-Forms with status 'recurent') are real team_expenses rows.
+// No more instance stitching needed.
 async function buildPnlExpenses(teamId: string, prevYear: number, baseYear: number) {
-  // Get all expenses for the date range
-  // Note: recurring_instance_id column doesn't exist - simplified query
   const { data: allExpenses, error } = await supabase
     .from("team_expenses")
     .select(`
@@ -26,9 +22,7 @@ async function buildPnlExpenses(teamId: string, prevYear: number, baseYear: numb
       vat_deductible,
       status,
       category_id,
-      subcategory_id,
-      is_recurring_placeholder,
-      recurring_expense_id
+      subcategory_id
     `)
     .eq("team_id", teamId)
     .is("deleted_at", null)
@@ -39,74 +33,19 @@ async function buildPnlExpenses(teamId: string, prevYear: number, baseYear: numb
     return [];
   }
 
-  // Filter by date range in JS (more reliable than complex OR conditions)
-  const filteredExpenses = (allExpenses || []).filter(expense => {
-    // Check accounting_period first if available
+  // Filter by date range using accounting_period (preferred) or expense_date
+  return (allExpenses || []).filter(expense => {
     if (expense.accounting_period) {
       const [yearStr] = expense.accounting_period.split('-');
       const year = parseInt(yearStr);
       return year >= prevYear && year <= baseYear;
     }
-    // Fall back to expense_date
     if (expense.expense_date) {
       const year = new Date(expense.expense_date).getFullYear();
       return year >= prevYear && year <= baseYear;
     }
     return false;
   });
-
-  // Get open instances as pseudo-expenses (only from ACTIVE templates)
-  let openInstances: any[] = [];
-  try {
-    // First get active template IDs
-    const { data: activeTemplates } = await supabase
-      .from("team_recurring_expenses")
-      .select("id")
-      .eq("team_id", teamId)
-      .eq("is_active", true)
-      .is("deleted_at", null);
-
-    const activeTemplateIds = (activeTemplates || []).map(t => t.id);
-
-    if (activeTemplateIds.length > 0) {
-      const { data: instances } = await supabase
-        .from("recurring_instances")
-        .select("*")
-        .eq("team_id", teamId)
-        .eq("status", "open")
-        .in("template_id", activeTemplateIds)
-        .gte("instance_year", prevYear)
-        .lte("instance_year", baseYear);
-      openInstances = instances || [];
-    }
-  } catch (e) {
-    // Table might not exist, ignore
-  }
-
-  // Convert open instances to expense-like format
-  const instanceExpenses = (openInstances || []).map((ri: any) => ({
-    id: ri.id,
-    expense_date: `${ri.instance_year}-${String(ri.instance_month).padStart(2, '0')}-01`,
-    accounting_period: `${ri.instance_year}-${String(ri.instance_month).padStart(2, '0')}`,
-    amount: ri.expected_amount,
-    amount_without_vat: ri.expected_amount_without_vat,
-    amount_with_vat: ri.expected_amount_with_vat,
-    vat_deductible: ri.expected_vat_deductible,
-    category_id: ri.expected_category_id,
-    subcategory_id: ri.expected_subcategory_id,
-    supplier: ri.expected_supplier,
-    description: ri.expected_description,
-    doc_number: null,
-    status: 'recurent',
-    is_recurring_placeholder: true,
-  }));
-
-  // Exclude old placeholder expenses from team_expenses when we have recurring_instances
-  // The recurring_instances system is now the authoritative source for recurring data
-  const nonPlaceholderExpenses = filteredExpenses.filter((e: any) => !e.is_recurring_placeholder);
-
-  // Combine real expenses with open instances from active templates
-  return [...nonPlaceholderExpenses, ...instanceExpenses];
 }
 
 export interface PnlCategory {
@@ -238,7 +177,6 @@ export async function getPnlData(
     status: string | null;
     category_id: string | null;
     subcategory_id: string | null;
-    is_recurring_placeholder: boolean | null;
   }
 
   // Helper to get expense amount based on VAT deductibility
@@ -408,7 +346,7 @@ export async function getPnlData(
       status: e.status || 'pending',
       category: (e.category_id && categoryMap.get(e.category_id)) || 'Uncategorized',
       subcategory: (e.subcategory_id && categoryMap.get(e.subcategory_id)) || '',
-      type: e.is_recurring_placeholder ? 'recurente' : 'reale',
+      type: e.status === 'recurent' ? 'recurente' : 'reale',
     };
   });
 
@@ -477,41 +415,12 @@ export async function getCategoryExpenses(
       amount_with_vat,
       amount_without_vat,
       vat_deductible,
-      status,
-      is_recurring_placeholder
+      status
     `)
     .eq("team_id", teamId)
     .is("deleted_at", null)
     .or(`category_id.eq.${category.id},subcategory_id.eq.${category.id}`)
     .in("status", ["approved", "paid", "pending", "draft", "recurent", "final"]);
-
-  // Also fetch open recurring instances for this category and month (only from ACTIVE templates)
-  let openInstances: any[] = [];
-  try {
-    const { data: activeTemplates } = await supabase
-      .from("team_recurring_expenses")
-      .select("id")
-      .eq("team_id", teamId)
-      .eq("is_active", true)
-      .is("deleted_at", null);
-
-    const activeTemplateIds = (activeTemplates || []).map((t: any) => t.id);
-
-    if (activeTemplateIds.length > 0) {
-      const { data: instances } = await supabase
-        .from("recurring_instances")
-        .select("*")
-        .eq("team_id", teamId)
-        .eq("status", "open")
-        .in("template_id", activeTemplateIds)
-        .eq("instance_year", year)
-        .eq("instance_month", month)
-        .or(`expected_category_id.eq.${category.id},expected_subcategory_id.eq.${category.id}`);
-      openInstances = instances || [];
-    }
-  } catch (e) {
-    // Table might not exist yet
-  }
 
   // Filter expenses by accounting_period (Luna P&L) or expense_date
   const targetMonthStr = String(month).padStart(2, '0');
@@ -527,26 +436,7 @@ export async function getCategoryExpenses(
     return expenseDate.getFullYear() === year && expenseDate.getMonth() + 1 === month;
   });
 
-  // Convert open recurring instances to the same format
-  const instanceExpenses: PnlExpense[] = openInstances.map(ri => ({
-    id: ri.id,
-    date: `${ri.instance_year}-${String(ri.instance_month).padStart(2, '0')}-01`,
-    supplier: ri.expected_supplier || 'Recurent',
-    description: ri.expected_description || 'Cheltuială recurentă',
-    invoiceNumber: '',
-    amount: ri.expected_vat_deductible
-      ? (ri.expected_amount_without_vat || ri.expected_amount || 0)
-      : (ri.expected_amount_with_vat || ri.expected_amount || 0),
-    status: 'recurent',
-    category: categoryName,
-    subcategory: '',
-    type: 'recurente' as const,
-  }));
-
-  // Exclude old placeholder expenses - recurring_instances is now authoritative
-  const nonPlaceholderExpenses = filteredExpenses.filter((e: any) => !e.is_recurring_placeholder);
-
-  const realExpenses: PnlExpense[] = nonPlaceholderExpenses.map(e => ({
+  const realExpenses: PnlExpense[] = filteredExpenses.map(e => ({
     id: e.id,
     date: e.expense_date,
     supplier: e.supplier || 'Unknown',
@@ -556,10 +446,10 @@ export async function getCategoryExpenses(
     status: e.status || 'pending',
     category: categoryName,
     subcategory: '',
-    type: 'reale',
+    type: e.status === 'recurent' ? 'recurente' : 'reale',
   }));
 
-  return [...realExpenses, ...instanceExpenses];
+  return realExpenses;
 }
 
 /**
@@ -914,7 +804,7 @@ async function _fetchPnlDashboardData(
           status: e.status || 'pending',
           category: (e.category_id && catMap.get(e.category_id)) || 'Uncategorized',
           subcategory: (e.subcategory_id && catMap.get(e.subcategory_id)) || '',
-          type: e.is_recurring_placeholder ? 'recurente' : 'reale',
+          type: e.status === 'recurent' ? 'recurente' : 'reale',
         }));
       })(),
     },

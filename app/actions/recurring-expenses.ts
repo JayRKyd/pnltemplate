@@ -252,8 +252,9 @@ export async function deleteRecurringExpense(id: string, teamId: string): Promis
   }
 }
 
-// Generate placeholders for a specific month (calls DB function)
-export async function generateRecurringPlaceholders(
+// Generate RE-Forms (real team_expenses rows with status='recurent') for a specific month
+// Replaces the old generateRecurringPlaceholders and generateMonthlyInstances
+export async function generateRecurringForms(
   teamId: string,
   targetMonth?: Date
 ): Promise<number> {
@@ -261,17 +262,25 @@ export async function generateRecurringPlaceholders(
     ? new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 1)
     : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
-  const { data, error } = await supabase.rpc("generate_recurring_placeholders", {
+  const { data, error } = await supabase.rpc("generate_recurring_forms", {
     p_team_id: teamId,
     p_target_month: monthDate.toISOString().split("T")[0],
   });
 
   if (error) {
-    console.error("[generateRecurringPlaceholders] Error:", error);
+    console.error("[generateRecurringForms] Error:", error);
     throw new Error(error.message);
   }
 
   return data || 0;
+}
+
+// @deprecated - Use generateRecurringForms instead
+export async function generateRecurringPlaceholders(
+  teamId: string,
+  targetMonth?: Date
+): Promise<number> {
+  return generateRecurringForms(teamId, targetMonth);
 }
 
 // Check if a matching recurring expense exists (for suggesting when creating new expense)
@@ -391,9 +400,9 @@ export async function updateRecurringTemplateVersioned(
   return newTemplate;
 }
 
-// Migrate closed instance status from entire version chain to new template
-// Walks previous_version_id chain to find ALL closed instances from any ancestor
-// Call this AFTER generating instances for the new template
+// Migrate RE-Forms from old template versions to the new template
+// Re-links team_expenses rows from ancestor templates to the new active template
+// Call this AFTER creating the new versioned template
 export async function migrateClosedInstances(
   oldTemplateId: string,
   newTemplateId: string,
@@ -412,52 +421,37 @@ export async function migrateClosedInstances(
       .single();
     
     currentId = result.data?.previous_version_id || null;
-    // Safety: prevent infinite loops
     if (ancestorIds.length > 50) break;
   }
 
   if (ancestorIds.length === 0) return;
 
-  // Fetch all closed instances from any ancestor template
-  const { data: closedInstances } = await supabase
-    .from("recurring_instances")
-    .select("*")
-    .in("template_id", ancestorIds)
+  // Re-link all finalized RE-Forms (draft/final) from ancestor templates to the new template
+  // This ensures X/✓ display carries across template versions
+  const { data: existingExpenses, error: fetchError } = await supabase
+    .from("team_expenses")
+    .select("id, recurring_expense_id, status")
     .eq("team_id", teamId)
-    .eq("status", "closed");
+    .in("recurring_expense_id", ancestorIds)
+    .in("status", ["draft", "final"])
+    .is("deleted_at", null);
 
-  if (!closedInstances || closedInstances.length === 0) return;
-
-  // Deduplicate by year+month (keep the most recent closed instance)
-  const uniqueByMonth = new Map<string, typeof closedInstances[0]>();
-  for (const inst of closedInstances) {
-    const key = `${inst.instance_year}-${inst.instance_month}`;
-    // Keep the one with the latest closed_at
-    const existing = uniqueByMonth.get(key);
-    if (!existing || (inst.closed_at && (!existing.closed_at || inst.closed_at > existing.closed_at))) {
-      uniqueByMonth.set(key, inst);
-    }
+  if (fetchError) {
+    console.error("[migrateClosedInstances] Error fetching expenses:", fetchError);
+    return;
   }
 
-  const now = new Date().toISOString();
-  for (const oldInst of uniqueByMonth.values()) {
+  if (!existingExpenses || existingExpenses.length === 0) return;
+
+  // Update recurring_expense_id to point to the new template
+  for (const exp of existingExpenses) {
     const { error } = await supabase
-      .from("recurring_instances")
-      .update({
-        status: "closed",
-        final_expense_id: oldInst.final_expense_id,
-        closed_at: oldInst.closed_at,
-        closed_by: oldInst.closed_by,
-        amount_difference_percent: oldInst.amount_difference_percent,
-        updated_at: now,
-      })
-      .eq("template_id", newTemplateId)
-      .eq("team_id", teamId)
-      .eq("instance_year", oldInst.instance_year)
-      .eq("instance_month", oldInst.instance_month);
+      .from("team_expenses")
+      .update({ recurring_expense_id: newTemplateId, updated_at: new Date().toISOString() })
+      .eq("id", exp.id);
 
     if (error) {
-      console.error(`[migrateClosedInstances] Error migrating ${oldInst.instance_year}-${oldInst.instance_month}:`, error);
+      console.error(`[migrateClosedInstances] Error re-linking expense ${exp.id}:`, error);
     }
   }
 }
@@ -548,6 +542,78 @@ export async function confirmPlaceholder(
   }
 }
 
+// Get RE-Forms (team_expenses) for a specific recurring template in a given year
+export interface TemplateExpense {
+  id: string;
+  month: number; // 1-indexed
+  year: number;
+  status: string; // 'recurent', 'draft', 'final'
+  amount: number | null;
+  supplier: string | null;
+}
+
+export async function getTemplateExpenses(
+  templateId: string,
+  teamId: string,
+  year: number
+): Promise<TemplateExpense[]> {
+  // Also collect ancestor template IDs for version chain
+  const allIds = [templateId];
+  let prevId: string | null = null;
+  
+  const { data: template } = await supabase
+    .from("team_recurring_expenses")
+    .select("previous_version_id")
+    .eq("id", templateId)
+    .single();
+  
+  prevId = template?.previous_version_id || null;
+  let depth = 0;
+  while (prevId && depth < 20) {
+    allIds.push(prevId);
+    const { data: ancestor } = await supabase
+      .from("team_recurring_expenses")
+      .select("previous_version_id")
+      .eq("id", prevId)
+      .single();
+    prevId = ancestor?.previous_version_id || null;
+    depth++;
+  }
+
+  const { data, error } = await supabase
+    .from("team_expenses")
+    .select("id, accounting_period, expense_date, status, amount, supplier")
+    .eq("team_id", teamId)
+    .in("recurring_expense_id", allIds)
+    .is("deleted_at", null);
+
+  if (error) {
+    console.error("[getTemplateExpenses] Error:", error);
+    return [];
+  }
+
+  return (data || []).map(exp => {
+    let month: number, yr: number;
+    if (exp.accounting_period) {
+      const [y, m] = exp.accounting_period.split('-').map(Number);
+      yr = y;
+      month = m;
+    } else {
+      const d = new Date(exp.expense_date + 'T00:00:00Z');
+      yr = d.getUTCFullYear();
+      month = d.getUTCMonth() + 1;
+    }
+    return {
+      id: exp.id,
+      month,
+      year: yr,
+      status: exp.status,
+      amount: exp.amount,
+      supplier: exp.supplier,
+    };
+  }).filter(e => e.year === year);
+}
+
 // Get recurring expenses with monthly payment status for the list view
 export interface RecurringExpenseWithPayments extends RecurringExpense {
   payments: {
@@ -564,6 +630,7 @@ export interface RecurringExpenseWithPayments extends RecurringExpense {
     nov?: boolean;
     dec?: boolean;
   };
+  expenseIds: Record<string, string>; // monthKey → team_expenses.id for navigation
   category_name?: string;
   subcategory_name?: string;
 }
@@ -571,10 +638,11 @@ export interface RecurringExpenseWithPayments extends RecurringExpense {
 export async function getRecurringExpensesWithPayments(
   teamId: string,
   startDate: string, // YYYY-MM-DD
-  endDate: string    // YYYY-MM-DD
+  endDate: string,   // YYYY-MM-DD
+  includeDeleted = false
 ): Promise<RecurringExpenseWithPayments[]> {
-  // Get all recurring expenses
-  const { data: recurringExpenses, error: recError } = await supabase
+  // Get recurring templates
+  let query = supabase
     .from("team_recurring_expenses")
     .select(`
       *,
@@ -582,9 +650,13 @@ export async function getRecurringExpensesWithPayments(
       subcategory:team_expense_categories!subcategory_id(name)
     `)
     .eq("team_id", teamId)
-    .eq("is_active", true)
-    .is("deleted_at", null)
     .order("created_at", { ascending: false });
+
+  if (!includeDeleted) {
+    query = query.eq("is_active", true).is("deleted_at", null);
+  }
+
+  const { data: recurringExpenses, error: recError } = await query;
 
   if (recError) {
     console.error("[getRecurringExpensesWithPayments] Error:", recError);
@@ -595,74 +667,103 @@ export async function getRecurringExpensesWithPayments(
     return [];
   }
 
-  // Get all generated expenses for these recurring templates for the given date range
+  // Get RE-Forms (real team_expenses rows) for these templates in the date range
   const recurringIds = recurringExpenses.map(r => r.id);
+
+  // Also include expenses linked to ancestor template versions (version chain)
+  // so that X/✓ marks carry across template versions
+  const allTemplateIds = [...recurringIds];
+  for (const rec of recurringExpenses) {
+    if (rec.previous_version_id) {
+      // Walk the version chain to collect ancestor IDs
+      let prevId: string | null = rec.previous_version_id;
+      let depth = 0;
+      while (prevId && depth < 20) {
+        allTemplateIds.push(prevId);
+        const { data: ancestor } = await supabase
+          .from("team_recurring_expenses")
+          .select("previous_version_id")
+          .eq("id", prevId)
+          .single();
+        prevId = ancestor?.previous_version_id || null;
+        depth++;
+      }
+    }
+  }
 
   const { data: expenses, error: expError } = await supabase
     .from("team_expenses")
-    .select("id, recurring_expense_id, expense_date, status, payment_status, is_recurring_placeholder")
+    .select("id, recurring_expense_id, accounting_period, expense_date, status, payment_status")
     .eq("team_id", teamId)
-    .in("recurring_expense_id", recurringIds)
-    .gte("expense_date", startDate)
-    .lte("expense_date", endDate)
+    .in("recurring_expense_id", allTemplateIds)
     .is("deleted_at", null);
 
   if (expError) {
     console.error("[getRecurringExpensesWithPayments] Expenses error:", expError);
   }
 
-  // Also fetch recurring_instances for accurate status (new system)
-  const { data: instances, error: instError } = await supabase
-    .from("recurring_instances")
-    .select("id, template_id, instance_year, instance_month, status")
-    .eq("team_id", teamId)
-    .in("template_id", recurringIds);
-
-  if (instError) {
-    console.error("[getRecurringExpensesWithPayments] Instances error:", instError);
-  }
-
-  // Build payments map using recurring_instances (authoritative source)
+  // Build payments map and expenseIds map from team_expenses (single source of truth)
   const paymentsMap = new Map<string, Record<string, boolean>>();
+  const expenseIdsMap = new Map<string, Record<string, string>>();
   const monthKeys = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
-  // First, populate from recurring_instances (new system - authoritative)
-  (instances || []).forEach(inst => {
-    if (!inst.template_id) return;
-    
-    const monthKey = monthKeys[inst.instance_month - 1]; // instance_month is 1-indexed
-    const yearMonthKey = `${inst.instance_year}-${monthKey}`;
-    
-    if (!paymentsMap.has(inst.template_id)) {
-      paymentsMap.set(inst.template_id, {});
+  // Map ancestor template IDs → active template ID for grouping
+  const ancestorToActive = new Map<string, string>();
+  for (const rec of recurringExpenses) {
+    ancestorToActive.set(rec.id, rec.id);
+    if (rec.previous_version_id) {
+      let prevId: string | null = rec.previous_version_id;
+      let depth = 0;
+      while (prevId && depth < 20) {
+        ancestorToActive.set(prevId, rec.id);
+        const found = allTemplateIds.includes(prevId);
+        if (!found) break;
+        // Walk chain (already collected above)
+        const { data: ancestor } = await supabase
+          .from("team_recurring_expenses")
+          .select("previous_version_id")
+          .eq("id", prevId)
+          .single();
+        prevId = ancestor?.previous_version_id || null;
+        depth++;
+      }
     }
-    
-    const payments = paymentsMap.get(inst.template_id)!;
-    // closed = green check (paid), open = red X (not paid)
-    payments[monthKey] = inst.status === 'closed';
-    payments[yearMonthKey] = inst.status === 'closed';
-  });
+  }
 
-  // Fallback: populate from team_expenses for templates without instances (legacy)
   (expenses || []).forEach(exp => {
     if (!exp.recurring_expense_id) return;
-    
-    const expenseDate = new Date(exp.expense_date + 'T00:00:00Z');
-    const month = expenseDate.getUTCMonth();
-    const year = expenseDate.getUTCFullYear();
+
+    // Determine the month from accounting_period (preferred) or expense_date
+    let month: number;
+    let year: number;
+    if (exp.accounting_period) {
+      const [y, m] = exp.accounting_period.split('-').map(Number);
+      year = y;
+      month = m - 1; // 0-indexed
+    } else {
+      const d = new Date(exp.expense_date + 'T00:00:00Z');
+      year = d.getUTCFullYear();
+      month = d.getUTCMonth();
+    }
+
     const monthKey = monthKeys[month];
-    const yearMonthKey = `${year}-${monthKey}`;
-    
-    if (!paymentsMap.has(exp.recurring_expense_id)) {
-      paymentsMap.set(exp.recurring_expense_id, {});
+    // Resolve to active template ID
+    const activeId = ancestorToActive.get(exp.recurring_expense_id) || exp.recurring_expense_id;
+
+    if (!paymentsMap.has(activeId)) {
+      paymentsMap.set(activeId, {});
     }
-    
-    const payments = paymentsMap.get(exp.recurring_expense_id)!;
-    // Only set from legacy if not already set by instances
-    if (payments[yearMonthKey] === undefined) {
-      payments[monthKey] = exp.payment_status === 'paid';
-      payments[yearMonthKey] = exp.payment_status === 'paid';
+    if (!expenseIdsMap.has(activeId)) {
+      expenseIdsMap.set(activeId, {});
     }
+
+    const payments = paymentsMap.get(activeId)!;
+    const ids = expenseIdsMap.get(activeId)!;
+    // X = status is 'recurent' (not yet touched by user)
+    // ✓ = status is 'draft' or 'final' (user has edited/finalized)
+    const isDone = exp.status === 'draft' || exp.status === 'final';
+    payments[monthKey] = isDone;
+    ids[monthKey] = exp.id;
   });
 
   // Combine data
@@ -670,7 +771,8 @@ export async function getRecurringExpensesWithPayments(
     ...rec,
     category_name: rec.category?.name,
     subcategory_name: rec.subcategory?.name,
-    payments: paymentsMap.get(rec.id) || {}
+    payments: paymentsMap.get(rec.id) || {},
+    expenseIds: expenseIdsMap.get(rec.id) || {}
   }));
 }
 

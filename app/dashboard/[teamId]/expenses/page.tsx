@@ -11,6 +11,7 @@ import {
 } from "@/app/actions/recurring-expenses";
 import { getTeamCategories, ExpenseCategory } from "@/app/actions/categories";
 import { getTeamMembers } from "@/app/actions/team-members";
+import { getUserPermissions } from "@/app/actions/permissions";
 
 type TabType = 'Cheltuieli' | 'Recurente';
 
@@ -30,6 +31,11 @@ const getStatusStyles = (status: string) => {
       return {
         background: 'linear-gradient(180deg, rgba(255, 224, 238, 1.00) 0%, rgba(255, 179, 217, 1.00) 100%)',
         borderColor: 'rgba(252, 206, 232, 0.3)'
+      };
+    case 'Șters':
+      return {
+        background: 'linear-gradient(180deg, rgba(229, 231, 235, 1.00) 0%, rgba(209, 213, 220, 1.00) 100%)',
+        borderColor: 'rgba(209, 213, 220, 0.3)'
       };
     default:
       return {
@@ -217,6 +223,8 @@ export default function ExpensesPage() {
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpenseWithPayments[]>([]);
   const [loading, setLoading] = useState(true);
   const [recurringLoading, setRecurringLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showDeletedTemplates, setShowDeletedTemplates] = useState(false);
   
   // Initialize tab from URL or default to 'Cheltuieli'
   const initialTab = (searchParams.get('tab') as TabType) || 'Cheltuieli';
@@ -355,13 +363,19 @@ export default function ExpensesPage() {
     };
   }, [searchValue]);
 
-  // Status options
-  const statusOptions: FilterOption[] = [
-    { value: '', label: 'Toate' },
-    { value: 'draft', label: 'Draft' },
-    { value: 'approved', label: 'Final' },
-    { value: 'recurring', label: 'Recurent' },
-  ];
+  // Status options (admin gets extra "Șterse" option)
+  const statusOptions: FilterOption[] = useMemo(() => {
+    const opts: FilterOption[] = [
+      { value: '', label: 'Toate' },
+      { value: 'draft', label: 'Draft' },
+      { value: 'approved', label: 'Final' },
+      { value: 'recurring', label: 'Recurent' },
+    ];
+    if (isAdmin) {
+      opts.push({ value: 'deleted', label: 'Șterse' });
+    }
+    return opts;
+  }, [isAdmin]);
 
   // Payment options
   const paymentOptions: FilterOption[] = [
@@ -411,8 +425,10 @@ export default function ExpensesPage() {
       if (selectedSubcategory) {
         filters.subcategoryId = selectedSubcategory;
       }
-      // Don't pass 'recurring' to backend - handle it client-side
-      if (selectedStatus && selectedStatus !== 'recurring') {
+      // Don't pass 'recurring' or 'deleted' to backend status - handle them client-side
+      if (selectedStatus === 'deleted') {
+        filters.includeDeleted = true;
+      } else if (selectedStatus && selectedStatus !== 'recurring') {
         filters.status = selectedStatus;
       }
       if (dateFrom) filters.dateFrom = dateFrom;
@@ -433,9 +449,14 @@ export default function ExpensesPage() {
         // Filter for recurring placeholders that are not yet marked as paid (Recurent status)
         filteredData = filteredData.filter(exp => 
           exp.recurring_expense_id !== null && 
-          (exp.is_recurring_placeholder === true || exp.status === 'placeholder') &&
+          (exp.is_recurring_placeholder === true || exp.status === 'placeholder' || exp.status === 'recurent') &&
           exp.payment_status !== 'paid'
         );
+      }
+      
+      // Apply deleted filter client-side — show only soft-deleted items
+      if (selectedStatus === 'deleted') {
+        filteredData = filteredData.filter(exp => exp.deleted_at !== null);
       }
       
       // Apply client-side search for tags and user/colleague if search value exists
@@ -496,14 +517,14 @@ export default function ExpensesPage() {
 
     setRecurringLoading(true);
     try {
-      const data = await getRecurringExpensesWithPayments(params.teamId, dateRange.startDate, dateRange.endDate);
+      const data = await getRecurringExpensesWithPayments(params.teamId, dateRange.startDate, dateRange.endDate, showDeletedTemplates);
       setAllRecurringExpenses(data);
     } catch (err) {
       console.error("Failed to fetch recurring expenses:", err);
     } finally {
       setRecurringLoading(false);
     }
-  }, [params.teamId, dateRange.startDate, dateRange.endDate]);
+  }, [params.teamId, dateRange.startDate, dateRange.endDate, showDeletedTemplates]);
 
   // Filter recurring expenses based on selected filters
   useEffect(() => {
@@ -549,6 +570,14 @@ export default function ExpensesPage() {
     setRecurringExpenses(filtered);
   }, [allRecurringExpenses, selectedCategory, selectedSubcategory, searchValue, dateFrom, dateTo, activeSubTab]);
 
+  // Load admin status
+  useEffect(() => {
+    if (!params.teamId) return;
+    getUserPermissions(params.teamId).then(perms => {
+      setIsAdmin(perms.role === 'admin');
+    }).catch(() => {});
+  }, [params.teamId]);
+
   // Load all data in parallel for better performance
   useEffect(() => {
     Promise.all([
@@ -581,20 +610,34 @@ export default function ExpensesPage() {
   // OPTIMIZED: Memoize displayData to avoid recalculating on every render
   const displayData = useMemo(() => {
     return expenses.map(exp => {
+      // Soft-deleted items always show as "Șters"
+      if (exp.deleted_at) {
+        return {
+          status: 'Șters' as const,
+          date: formatExpenseDate(exp.expense_date),
+          type: exp.doc_type || 'Factura',
+          provider: exp.supplier || '-',
+          description: exp.description || '-',
+          amount: formatAmountMain(exp.amount || 0),
+          decimals: formatAmountDecimals(exp.amount || 0),
+          paid: exp.payment_status === 'paid',
+          id: exp.id,
+          isRecurring: !!exp.recurring_expense_id,
+          isDeleted: true
+        };
+      }
+
       // Determine status: Recurring placeholders show as "Recurent" until marked as paid
       let displayStatus: 'Final' | 'Draft' | 'Recurent';
 
       if (exp.recurring_expense_id) {
         // This is a recurring-linked expense
-        if (exp.is_recurring_placeholder || exp.status === 'placeholder') {
-          // Placeholder or not yet paid - show as Recurent
+        if (exp.is_recurring_placeholder || exp.status === 'placeholder' || exp.status === 'recurent') {
           displayStatus = 'Recurent';
         } else if (exp.payment_status === 'paid' || exp.status === 'approved' || exp.status === 'paid') {
-          // Marked as paid - show as Final
           displayStatus = 'Final';
         } else {
-          // Recurring but not placeholder and not paid - show as Recurent
-          displayStatus = 'Recurent';
+          displayStatus = exp.status === 'draft' ? 'Draft' : 'Recurent';
         }
       } else {
         // Regular expense (not recurring)
@@ -611,7 +654,8 @@ export default function ExpensesPage() {
         decimals: formatAmountDecimals(exp.amount || 0),
         paid: exp.payment_status === 'paid',
         id: exp.id,
-        isRecurring: !!exp.recurring_expense_id
+        isRecurring: !!exp.recurring_expense_id,
+        isDeleted: false
       };
     });
   }, [expenses]);
@@ -1326,13 +1370,14 @@ export default function ExpensesPage() {
                         style={{
                           height: '49px',
                           borderBottom: '1px solid rgba(229, 231, 235, 0.3)',
-                          cursor: 'pointer',
-                          transition: 'background-color 0.2s'
+                          cursor: row.isDeleted ? 'default' : 'pointer',
+                          transition: 'background-color 0.2s',
+                          opacity: row.isDeleted ? 0.5 : 1
                         }}
-                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(240, 253, 250, 0.3)')}
+                        onMouseEnter={e => { if (!row.isDeleted) e.currentTarget.style.backgroundColor = 'rgba(240, 253, 250, 0.3)'; }}
                         onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
                         onClick={() => {
-                          if ('id' in row && row.id) {
+                          if (!row.isDeleted && 'id' in row && row.id) {
                             router.push(`/dashboard/${params.teamId}/expenses/${row.id}`);
                           }
                         }}
@@ -1355,16 +1400,16 @@ export default function ExpensesPage() {
                           {row.status}
                         </div>
                       </td>
-                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(16, 24, 40, 1)' }}>
+                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(16, 24, 40, 1)', textDecoration: row.isDeleted ? 'line-through' : 'none' }}>
                         {row.date}
                       </td>
-                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(54, 65, 83, 1)' }}>
+                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(54, 65, 83, 1)', textDecoration: row.isDeleted ? 'line-through' : 'none' }}>
                         {row.type}
                       </td>
-                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(16, 24, 40, 1)' }}>
+                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(16, 24, 40, 1)', textDecoration: row.isDeleted ? 'line-through' : 'none' }}>
                         {row.provider}
                       </td>
-                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(54, 65, 83, 1)' }}>
+                      <td style={{ padding: '0 24px', fontSize: '14px', color: 'rgba(54, 65, 83, 1)', textDecoration: row.isDeleted ? 'line-through' : 'none' }}>
                         {row.description}
                       </td>
                       <td style={{ padding: '0 24px', textAlign: 'center' }}>
@@ -1405,6 +1450,21 @@ export default function ExpensesPage() {
 
         {/* Recurente Table */}
         {activeSubTab === 'Recurente' && (
+          <>
+          {/* §15: Admin toggle for deleted templates */}
+          {isAdmin && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', paddingLeft: '4px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: 'rgba(107, 114, 128, 1)' }}>
+                <input
+                  type="checkbox"
+                  checked={showDeletedTemplates}
+                  onChange={(e) => setShowDeletedTemplates(e.target.checked)}
+                  style={{ accentColor: 'rgba(239, 68, 68, 1)', width: '16px', height: '16px', cursor: 'pointer' }}
+                />
+                Afișează template-uri șterse / inactive
+              </label>
+            </div>
+          )}
           <div style={{
             backgroundColor: 'rgba(255, 255, 255, 0.7)',
             border: '1px solid rgba(229, 231, 235, 0.5)',
@@ -1479,6 +1539,9 @@ export default function ExpensesPage() {
                     const amountParts = formatDisplayAmount(amount).split(',');
                     const mainAmount = amountParts[0] + ',';
                     const decimals = amountParts[1] || '00';
+                    const isDeletedTemplate = !!expense.deleted_at;
+                    const isInactiveTemplate = !expense.is_active;
+                    const isDisabledRow = isDeletedTemplate || isInactiveTemplate;
                     
                     return (
                       <tr 
@@ -1486,28 +1549,33 @@ export default function ExpensesPage() {
                         style={{
                           height: '65px',
                           borderBottom: '1px solid rgba(229, 231, 235, 0.3)',
-                          cursor: 'pointer',
-                          transition: 'background-color 0.2s'
+                          cursor: isDisabledRow ? 'default' : 'pointer',
+                          transition: 'background-color 0.2s',
+                          opacity: isDisabledRow ? 0.5 : 1
                         }}
-                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(44, 173, 189, 0.02)')}
+                        onMouseEnter={e => { if (!isDisabledRow) e.currentTarget.style.backgroundColor = 'rgba(44, 173, 189, 0.02)'; }}
                         onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                        onClick={() => router.push(`/dashboard/${params.teamId}/expenses/recurring/${expense.id}`)}
+                        onClick={() => !isDisabledRow && router.push(`/dashboard/${params.teamId}/expenses/recurring/${expense.id}`)}
                       >
                         <td style={{ 
                           width: '379.2px',
                           paddingLeft: '24px', 
                           fontSize: '15px', 
                           fontWeight: 500, 
-                          color: 'rgba(16, 24, 40, 1)' 
+                          color: 'rgba(16, 24, 40, 1)',
+                          textDecoration: isDeletedTemplate ? 'line-through' : 'none'
                         }}>
                           {expense.supplier || '-'}
+                          {isDeletedTemplate && <span style={{ marginLeft: '8px', fontSize: '11px', color: 'rgba(239, 68, 68, 0.8)', fontWeight: 600 }}>Șters</span>}
+                          {!isDeletedTemplate && isInactiveTemplate && <span style={{ marginLeft: '8px', fontSize: '11px', color: 'rgba(245, 158, 11, 0.8)', fontWeight: 600 }}>Inactiv</span>}
                         </td>
                         <td style={{ 
                           width: '452px',
                           paddingLeft: '24px', 
                           fontSize: '14px', 
                           fontWeight: 400, 
-                          color: 'rgba(54, 65, 83, 1)' 
+                          color: 'rgba(54, 65, 83, 1)',
+                          textDecoration: isDeletedTemplate ? 'line-through' : 'none'
                         }}>
                           {expense.description || '-'}
                         </td>
@@ -1537,15 +1605,12 @@ export default function ExpensesPage() {
                                 style={{ display: 'flex', justifyContent: 'center', cursor: 'pointer' }}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setRecurringPaymentModal({
-                                    isOpen: true,
-                                    recurringId: expense.id,
-                                    supplierName: expense.supplier || '-',
-                                    monthKey: monthInfo.key,
-                                    monthIndex: monthInfo.index,
-                                    year: monthInfo.year,
-                                    currentlyPaid: isPaid
-                                  });
+                                  // Navigate to expense form for this RE-Form
+                                  const expenseIds = (expense as any).expenseIds as Record<string, string> | undefined;
+                                  const expId = expenseIds?.[englishMonthKey];
+                                  if (expId) {
+                                    router.push(`/dashboard/${params.teamId}/expenses/${expId}`);
+                                  }
                                 }}
                               >
                                 <MonthPaymentIcon paid={isPaid} />
@@ -1566,6 +1631,7 @@ export default function ExpensesPage() {
               </table>
             )}
           </div>
+          </>
         )}
 
         {/* Recurring Payment Status Modal */}

@@ -12,11 +12,14 @@ import {
   RecurringExpense,
   deactivateRecurringExpense,
   reactivateRecurringExpense,
-  deleteRecurringExpense
+  deleteRecurringExpense,
+  getTemplateExpenses,
+  TemplateExpense,
+  generateRecurringForms,
+  getTemplateVersionHistory
 } from '@/app/actions/recurring-expenses';
-import { RecurringInstance, getRecurringInstances, generateMonthlyInstances } from '@/app/actions/recurring-instances';
-import { ConvertRecurringDialog } from '@/components/expenses/convert-recurring-dialog';
 import { useUser } from '@stackframe/stack';
+import { getUserPermissions } from '@/app/actions/permissions';
 
 export default function RecurringExpenseDetailPage() {
   const params = useParams<{ teamId: string; id: string }>();
@@ -26,7 +29,20 @@ export default function RecurringExpenseDetailPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteStep2, setShowDeleteStep2] = useState(false);
+  const [showInactivateConfirm, setShowInactivateConfirm] = useState(false);
+  const [showInactivateStep2, setShowInactivateStep2] = useState(false);
   const [recurringExpense, setRecurringExpense] = useState<RecurringExpense | null>(null);
+
+  // §10: Double confirmation + month picker for template versioning
+  const [showVersionConfirm, setShowVersionConfirm] = useState(false);
+  const [showVersionStep2, setShowVersionStep2] = useState(false);
+  const [versionStartMonth, setVersionStartMonth] = useState<number>(new Date().getMonth());
+  const [versionStartYear, setVersionStartYear] = useState<number>(new Date().getFullYear());
+  const [pendingUpdatePayload, setPendingUpdatePayload] = useState<any>(null);
+
+  // §10: Version history
+  const [versionHistory, setVersionHistory] = useState<RecurringExpense[]>([]);
 
   const [activeStatus, setActiveStatus] = useState<'activ' | 'inactiv'>('activ');
   const [numeFurnizor, setNumeFurnizor] = useState('');
@@ -44,13 +60,23 @@ export default function RecurringExpenseDetailPage() {
   const [showContDropdown, setShowContDropdown] = useState(false);
   const [showSubcontDropdown, setShowSubcontDropdown] = useState(false);
 
-  // Recurring instances state
-  const [instances, setInstances] = useState<RecurringInstance[]>([]);
-  const [showConvertDialog, setShowConvertDialog] = useState(false);
-  const [selectedInstance, setSelectedInstance] = useState<RecurringInstance | null>(null);
+  // RE-Forms state (team_expenses linked to this template)
+  const [templateExpenses, setTemplateExpenses] = useState<TemplateExpense[]>([]);
 
   // Get user from hook
   const user = useUser();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Check admin status
+  useEffect(() => {
+    if (!params.teamId) return;
+    getUserPermissions(params.teamId).then(perms => {
+      setIsAdmin(perms.role === 'admin');
+    }).catch(() => {});
+  }, [params.teamId]);
+
+  // §13: Only creator or admin can delete/inactivate
+  const canDeleteOrInactivate = isAdmin || (user?.id === recurringExpense?.user_id);
 
   // Load recurring expense data and instances
   useEffect(() => {
@@ -60,32 +86,42 @@ export default function RecurringExpenseDetailPage() {
       setLoading(true);
       try {
         const currentYear = new Date().getFullYear();
-        const [expense, cats, initialInstances] = await Promise.all([
+        const [expense, cats, reForms] = await Promise.all([
           getRecurringExpense(params.id),
           getCategoryTree(params.teamId),
-          getRecurringInstances(params.id, params.teamId, currentYear)
+          getTemplateExpenses(params.id, params.teamId, currentYear)
         ]);
 
         setCategories(cats);
 
-        // Auto-generate instances if none exist for this template
-        let finalInstances = initialInstances;
-        if (expense && expense.is_active && initialInstances.length === 0) {
+        // Auto-generate RE-Forms if none exist for this template
+        // Only generate for months up to and including the current month (not future)
+        let finalForms = reForms;
+        if (expense && expense.is_active && reForms.length === 0) {
           try {
+            const now = new Date();
+            const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
             const startDate = new Date(expense.start_date);
             for (let m = 0; m < 12; m++) {
               const targetMonth = new Date(currentYear, m, 1);
-              if (targetMonth >= new Date(startDate.getFullYear(), startDate.getMonth(), 1)) {
-                await generateMonthlyInstances(params.teamId, targetMonth);
+              if (targetMonth >= new Date(startDate.getFullYear(), startDate.getMonth(), 1) && targetMonth <= currentMonth) {
+                await generateRecurringForms(params.teamId, targetMonth);
               }
             }
-            finalInstances = await getRecurringInstances(params.id, params.teamId, currentYear);
+            finalForms = await getTemplateExpenses(params.id, params.teamId, currentYear);
           } catch (genError) {
-            console.error('Failed to auto-generate instances:', genError);
+            console.error('Failed to auto-generate RE-Forms:', genError);
           }
         }
 
-        setInstances(finalInstances);
+        setTemplateExpenses(finalForms);
+
+        // Load version history (previous inactive templates)
+        try {
+          const history = await getTemplateVersionHistory(params.id, params.teamId);
+          // Filter out current template, show only predecessors
+          setVersionHistory(history.filter(v => v.id !== params.id));
+        } catch { /* version history is optional */ }
 
         if (expense) {
           setRecurringExpense(expense);
@@ -131,21 +167,9 @@ export default function RecurringExpenseDetailPage() {
     return parseFloat(cleaned) || 0;
   };
 
-  // Open convert dialog for an instance
-  const handleOpenConvert = (instance: RecurringInstance) => {
-    setSelectedInstance(instance);
-    setShowConvertDialog(true);
-  };
-
-  // Reload instances after successful convert
-  const handleConvertSuccess = async () => {
-    setShowConvertDialog(false);
-    setSelectedInstance(null);
-
-    // Reload instances
-    const currentYear = new Date().getFullYear();
-    const loadedInstances = await getRecurringInstances(params.id, params.teamId, currentYear);
-    setInstances(loadedInstances);
+  // Navigate to the expense form for a RE-Form
+  const handleOpenExpenseForm = (expenseId: string) => {
+    router.push(`/dashboard/${params.teamId}/expenses/${expenseId}`);
   };
 
   // Get subcategories for selected category
@@ -173,55 +197,48 @@ export default function RecurringExpenseDetailPage() {
   const handleSave = async () => {
     if (!recurringExpense) return;
     
+    const newAmountWithVat = parseAmount(sumaCuTVA) || undefined;
+    const newAmountWithoutVat = parseAmount(sumaFaraTVA) || undefined;
+    const newAmount = parseAmount(sumaFaraTVA) || parseAmount(sumaCuTVA);
+
+    // Detect if amounts changed → need versioned update with confirmation
+    const amountsChanged = 
+      (newAmountWithVat ?? 0) !== (recurringExpense.amount_with_vat ?? 0) ||
+      (newAmountWithoutVat ?? 0) !== (recurringExpense.amount_without_vat ?? 0);
+
+    const updatePayload = {
+      supplier: numeFurnizor || undefined,
+      description: descriere || undefined,
+      tags: tags ? tags.split(',').map(t => t.trim()) : undefined,
+      categoryId: cont || undefined,
+      subcategoryId: subcont || undefined,
+      vatDeductible: tvaDeductibil === 'Da',
+      amountWithVat: newAmountWithVat,
+      amountWithoutVat: newAmountWithoutVat,
+      amount: newAmount,
+    };
+
+    // Handle inactivation with double confirmation (§13)
+    if (activeStatus === 'inactiv' && recurringExpense.is_active) {
+      setPendingUpdatePayload({ ...updatePayload, amountsChanged });
+      setShowInactivateConfirm(true);
+      return;
+    }
+
+    if (amountsChanged) {
+      // §10: Show double confirmation + month picker
+      setPendingUpdatePayload(updatePayload);
+      setShowVersionConfirm(true);
+      return;
+    }
+
+    // Simple in-place update (no amount change, no inactivation)
     setSaving(true);
     try {
-      const newAmountWithVat = parseAmount(sumaCuTVA) || undefined;
-      const newAmountWithoutVat = parseAmount(sumaFaraTVA) || undefined;
-      const newAmount = parseAmount(sumaFaraTVA) || parseAmount(sumaCuTVA);
+      await updateRecurringExpense(params.id, params.teamId, updatePayload);
 
-      // FR-8: Detect if amounts changed → use versioned update
-      const amountsChanged = 
-        (newAmountWithVat ?? 0) !== (recurringExpense.amount_with_vat ?? 0) ||
-        (newAmountWithoutVat ?? 0) !== (recurringExpense.amount_without_vat ?? 0);
-
-      const updatePayload = {
-        supplier: numeFurnizor || undefined,
-        description: descriere || undefined,
-        tags: tags ? tags.split(',').map(t => t.trim()) : undefined,
-        categoryId: cont || undefined,
-        subcategoryId: subcont || undefined,
-        vatDeductible: tvaDeductibil === 'Da',
-        amountWithVat: newAmountWithVat,
-        amountWithoutVat: newAmountWithoutVat,
-        amount: newAmount,
-      };
-
-      if (amountsChanged) {
-        // Versioned update: deactivate old, create new template
-        const newTemplate = await updateRecurringTemplateVersioned(params.id, params.teamId, updatePayload);
-
-        // Generate instances for the new template
-        const currentYear = new Date().getFullYear();
-        const startDate = new Date(newTemplate.start_date);
-        for (let m = 0; m < 12; m++) {
-          const targetMonth = new Date(currentYear, m, 1);
-          if (targetMonth >= new Date(startDate.getFullYear(), startDate.getMonth(), 1)) {
-            await generateMonthlyInstances(params.teamId, targetMonth);
-          }
-        }
-
-        // Migrate closed instance status from old to new template
-        await migrateClosedInstances(params.id, newTemplate.id, params.teamId);
-      } else {
-        // Simple in-place update (no amount change)
-        await updateRecurringExpense(params.id, params.teamId, updatePayload);
-      }
-      
-      // Handle active/inactive status
       if (activeStatus === 'activ' && !recurringExpense.is_active) {
         await reactivateRecurringExpense(params.id, params.teamId);
-      } else if (activeStatus === 'inactiv' && recurringExpense.is_active) {
-        await deactivateRecurringExpense(params.id, params.teamId);
       }
       
       router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
@@ -230,6 +247,70 @@ export default function RecurringExpenseDetailPage() {
       alert('Eroare la salvare. Încearcă din nou.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // §10: Execute versioned update after double confirmation + month selection
+  const executeVersionedUpdate = async () => {
+    if (!pendingUpdatePayload) return;
+    
+    setSaving(true);
+    setShowVersionStep2(false);
+    setShowVersionConfirm(false);
+    try {
+      const startDate = `${versionStartYear}-${String(versionStartMonth + 1).padStart(2, '0')}-01`;
+      const payload = { ...pendingUpdatePayload, startDate };
+      
+      const newTemplate = await updateRecurringTemplateVersioned(params.id, params.teamId, payload);
+
+      // Generate RE-Forms for the new template (only up to current month, not future)
+      const now = new Date();
+      const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const currentYear = now.getFullYear();
+      const newStart = new Date(newTemplate.start_date);
+      for (let m = 0; m < 12; m++) {
+        const targetMonth = new Date(currentYear, m, 1);
+        if (targetMonth >= new Date(newStart.getFullYear(), newStart.getMonth(), 1) && targetMonth <= currentMonth) {
+          await generateRecurringForms(params.teamId, targetMonth);
+        }
+      }
+
+      await migrateClosedInstances(params.id, newTemplate.id, params.teamId);
+      
+      router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
+    } catch (error) {
+      console.error('Failed to save recurring expense:', error);
+      alert('Eroare la salvare. Încearcă din nou.');
+    } finally {
+      setSaving(false);
+      setPendingUpdatePayload(null);
+    }
+  };
+
+  // §13: Execute inactivation after double confirmation
+  const executeInactivation = async () => {
+    setSaving(true);
+    setShowInactivateStep2(false);
+    setShowInactivateConfirm(false);
+    try {
+      // Also save any field updates
+      if (pendingUpdatePayload) {
+        const { amountsChanged, ...payload } = pendingUpdatePayload;
+        if (amountsChanged) {
+          const newTemplate = await updateRecurringTemplateVersioned(params.id, params.teamId, payload);
+          await migrateClosedInstances(params.id, newTemplate.id, params.teamId);
+        } else {
+          await updateRecurringExpense(params.id, params.teamId, payload);
+        }
+      }
+      await deactivateRecurringExpense(params.id, params.teamId);
+      router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
+    } catch (error) {
+      console.error('Failed to inactivate:', error);
+      alert('Eroare. Încearcă din nou.');
+    } finally {
+      setSaving(false);
+      setPendingUpdatePayload(null);
     }
   };
 
@@ -377,17 +458,20 @@ export default function RecurringExpenseDetailPage() {
               Activ
             </button>
             <button
-              onClick={() => setActiveStatus('inactiv')}
+              onClick={() => canDeleteOrInactivate && setActiveStatus('inactiv')}
+              disabled={!canDeleteOrInactivate}
+              title={!canDeleteOrInactivate ? 'Doar creatorul sau un admin poate dezactiva' : ''}
               style={{
                 padding: '7px 14px',
                 borderRadius: '9999px',
                 border: 'none',
-                cursor: 'pointer',
+                cursor: !canDeleteOrInactivate ? 'not-allowed' : 'pointer',
                 backgroundColor: activeStatus === 'inactiv' ? 'rgba(17, 198, 182, 1)' : 'transparent',
                 color: activeStatus === 'inactiv' ? 'white' : 'rgba(107, 114, 128, 1)',
                 fontSize: '13px',
                 fontWeight: 500,
-                transition: 'all 0.2s'
+                transition: 'all 0.2s',
+                opacity: !canDeleteOrInactivate ? 0.5 : 1
               }}
             >
               Inactiv
@@ -727,26 +811,27 @@ export default function RecurringExpenseDetailPage() {
               ];
 
               return romanianMonths.map((monthName, monthIndex) => {
-                const instance = instances.find(i => i.instance_month === monthIndex + 1);
-                const isClosed = instance?.status === 'closed';
-                const isOpen = instance?.status === 'open';
+                const reForm = templateExpenses.find((e: TemplateExpense) => e.month === monthIndex + 1);
+                const isDone = reForm?.status === 'draft' || reForm?.status === 'final';
+                const isRecurent = reForm?.status === 'recurent';
+                const hasExpense = !!reForm;
 
                 return (
                   <div
                     key={`${monthName}-${currentYear}`}
-                    onClick={() => instance && isOpen && handleOpenConvert(instance)}
+                    onClick={() => reForm && handleOpenExpenseForm(reForm.id)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       padding: '10px 0',
-                      cursor: isOpen ? 'pointer' : 'default',
+                      cursor: hasExpense ? 'pointer' : 'default',
                       borderBottom: monthIndex < 11 ? '1px solid rgba(243, 244, 246, 1)' : 'none',
                       transition: 'background-color 0.2s',
-                      backgroundColor: isOpen ? 'rgba(255, 255, 255, 0)' : 'transparent',
+                      backgroundColor: 'transparent',
                     }}
                     onMouseEnter={(e) => {
-                      if (isOpen) e.currentTarget.style.backgroundColor = 'rgba(240, 253, 250, 0.5)';
+                      if (hasExpense) e.currentTarget.style.backgroundColor = 'rgba(240, 253, 250, 0.5)';
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.backgroundColor = 'transparent';
@@ -760,7 +845,7 @@ export default function RecurringExpenseDetailPage() {
                       {monthName} {currentYear}
                     </span>
 
-                    {isClosed && (
+                    {isDone && (
                       <div style={{
                         width: '26px',
                         height: '26px',
@@ -774,7 +859,7 @@ export default function RecurringExpenseDetailPage() {
                       </div>
                     )}
 
-                    {isOpen && (
+                    {isRecurent && (
                       <div style={{
                         width: '26px',
                         height: '26px',
@@ -788,7 +873,7 @@ export default function RecurringExpenseDetailPage() {
                       </div>
                     )}
 
-                    {!instance && (
+                    {!hasExpense && (
                       <div style={{
                         width: '26px',
                         height: '26px',
@@ -804,6 +889,44 @@ export default function RecurringExpenseDetailPage() {
           </div>
         </div>
 
+        {/* §10: Version History Links */}
+        {versionHistory.length > 0 && (
+          <div style={{
+            padding: '0 28px 16px',
+            borderTop: '1px solid rgba(229, 231, 235, 0.3)'
+          }}>
+            <p style={{ fontSize: '13px', color: 'rgba(107, 114, 128, 1)', marginBottom: '8px', marginTop: '16px' }}>Versiuni anterioare (inactive):</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {versionHistory.map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => router.push(`/dashboard/${params.teamId}/expenses/recurring/${v.id}`)}
+                  style={{
+                    background: 'none',
+                    border: '1px solid rgba(229, 231, 235, 0.5)',
+                    borderRadius: '8px',
+                    padding: '8px 14px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    transition: 'background-color 0.15s'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(243, 244, 246, 0.5)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  <span style={{ fontSize: '13px', color: 'rgba(55, 65, 81, 1)' }}>
+                    v{v.version || 1} — {v.supplier || 'Fără furnizor'} — {v.amount_with_vat ? formatAmount(v.amount_with_vat) : formatAmount(v.amount)} Lei
+                  </span>
+                  <span style={{ fontSize: '12px', color: 'rgba(156, 163, 175, 1)' }}>
+                    {v.superseded_at ? `Inactiv din ${new Date(v.superseded_at).toLocaleDateString('ro-RO')}` : 'Inactiv'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Footer - Delete and Save Buttons */}
         <div style={{
           padding: '20px 28px 28px',
@@ -811,6 +934,7 @@ export default function RecurringExpenseDetailPage() {
           justifyContent: 'center',
           gap: '16px'
         }}>
+          {canDeleteOrInactivate && (
           <button
             onClick={() => setShowDeleteConfirm(true)}
             disabled={saving || deleting}
@@ -832,6 +956,7 @@ export default function RecurringExpenseDetailPage() {
             <Trash2 size={16} />
             Șterge
           </button>
+          )}
           <button
             onClick={handleSave}
             disabled={saving}
@@ -855,115 +980,139 @@ export default function RecurringExpenseDetailPage() {
         </div>
       </div>
 
-      {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 200,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}>
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.3)',
-              backdropFilter: 'blur(4px)'
-            }}
-            onClick={() => !deleting && setShowDeleteConfirm(false)}
-          />
-
-          <div style={{
-            position: 'relative',
-            backgroundColor: 'white',
-            borderRadius: '16px',
-            boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)',
-            width: '100%',
-            maxWidth: '480px',
-            margin: '16px',
-            padding: '32px'
-          }}>
-            <h2 style={{
-              fontSize: '20px',
-              fontWeight: 600,
-              color: 'rgba(16, 24, 40, 1)',
-              marginBottom: '16px'
-            }}>
-              Confirmă ștergerea
-            </h2>
-
-            <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '8px' }}>
-              Ești sigur că vrei să ștergi această cheltuială recurentă?
-            </p>
-
-            <p style={{
-              color: 'rgba(239, 68, 68, 1)',
-              fontWeight: 500,
-              fontSize: '14px',
-              marginBottom: '24px',
-              backgroundColor: 'rgba(254, 242, 242, 1)',
-              padding: '12px 16px',
-              borderRadius: '8px'
-            }}>
-              Aceasta va șterge și toate înregistrările asociate din Cheltuieli.
-            </p>
-
+      {/* Delete Confirmation Modal - Step 1 */}
+      {showDeleteConfirm && !showDeleteStep2 && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} onClick={() => setShowDeleteConfirm(false)} />
+          <div style={{ position: 'relative', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '480px', margin: '16px', padding: '32px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'rgba(16, 24, 40, 1)', marginBottom: '16px' }}>Confirmă ștergerea</h2>
+            <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '24px' }}>Ești sigur că vrei să ștergi această cheltuială recurentă?</p>
             <div style={{ display: 'flex', gap: '12px' }}>
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                disabled={deleting}
-                style={{
-                  flex: 1,
-                  padding: '12px 24px',
-                  border: '1px solid rgba(229, 231, 235, 1)',
-                  borderRadius: '9999px',
-                  color: 'rgba(55, 65, 81, 1)',
-                  fontWeight: 500,
-                  backgroundColor: 'white',
-                  cursor: deleting ? 'not-allowed' : 'pointer',
-                  opacity: deleting ? 0.5 : 1
-                }}
-              >
-                Anulează
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                style={{
-                  flex: 1,
-                  padding: '12px 24px',
-                  backgroundColor: 'rgba(239, 68, 68, 1)',
-                  color: 'white',
-                  borderRadius: '9999px',
-                  fontWeight: 500,
-                  border: 'none',
-                  cursor: deleting ? 'not-allowed' : 'pointer',
-                  opacity: deleting ? 0.7 : 1
-                }}
-              >
-                {deleting ? 'Se șterge...' : 'Șterge definitiv'}
-              </button>
+              <button onClick={() => setShowDeleteConfirm(false)} style={{ flex: 1, padding: '12px 24px', border: '1px solid rgba(229, 231, 235, 1)', borderRadius: '9999px', color: 'rgba(55, 65, 81, 1)', fontWeight: 500, backgroundColor: 'white', cursor: 'pointer' }}>Anulează</button>
+              <button onClick={() => setShowDeleteStep2(true)} style={{ flex: 1, padding: '12px 24px', backgroundColor: 'rgba(239, 68, 68, 1)', color: 'white', borderRadius: '9999px', fontWeight: 500, border: 'none', cursor: 'pointer' }}>Da, continuă</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Convert Recurring Dialog */}
-      {showConvertDialog && selectedInstance && user && (
-        <ConvertRecurringDialog
-          isOpen={showConvertDialog}
-          onClose={() => {
-            setShowConvertDialog(false);
-            setSelectedInstance(null);
-          }}
-          instance={selectedInstance}
-          teamId={params.teamId}
-          userId={user.id}
-          onSuccess={handleConvertSuccess}
-        />
+      {/* Delete Confirmation Modal - Step 2 (final) */}
+      {showDeleteConfirm && showDeleteStep2 && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} onClick={() => !deleting && (setShowDeleteStep2(false), setShowDeleteConfirm(false))} />
+          <div style={{ position: 'relative', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '480px', margin: '16px', padding: '32px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'rgba(239, 68, 68, 1)', marginBottom: '16px' }}>Confirmare finală</h2>
+            <p style={{ color: 'rgba(239, 68, 68, 1)', fontWeight: 500, fontSize: '14px', marginBottom: '24px', backgroundColor: 'rgba(254, 242, 242, 1)', padding: '12px 16px', borderRadius: '8px' }}>
+              Aceasta va șterge template-ul și toate înregistrările asociate din Cheltuieli. Acțiunea nu poate fi anulată.
+            </p>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={() => { setShowDeleteStep2(false); setShowDeleteConfirm(false); }} disabled={deleting} style={{ flex: 1, padding: '12px 24px', border: '1px solid rgba(229, 231, 235, 1)', borderRadius: '9999px', color: 'rgba(55, 65, 81, 1)', fontWeight: 500, backgroundColor: 'white', cursor: deleting ? 'not-allowed' : 'pointer', opacity: deleting ? 0.5 : 1 }}>Anulează</button>
+              <button onClick={handleDelete} disabled={deleting} style={{ flex: 1, padding: '12px 24px', backgroundColor: 'rgba(239, 68, 68, 1)', color: 'white', borderRadius: '9999px', fontWeight: 500, border: 'none', cursor: deleting ? 'not-allowed' : 'pointer', opacity: deleting ? 0.7 : 1 }}>{deleting ? 'Se șterge...' : 'Șterge definitiv'}</button>
+            </div>
+          </div>
+        </div>
       )}
+
+      {/* §13: Inactivation Confirmation - Step 1 */}
+      {showInactivateConfirm && !showInactivateStep2 && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} onClick={() => setShowInactivateConfirm(false)} />
+          <div style={{ position: 'relative', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '480px', margin: '16px', padding: '32px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'rgba(16, 24, 40, 1)', marginBottom: '16px' }}>Dezactivare template</h2>
+            <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '24px' }}>Template-ul va deveni inactiv și nu va mai genera RE-Form-uri noi. Cheltuielile existente nu vor fi modificate.</p>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={() => setShowInactivateConfirm(false)} style={{ flex: 1, padding: '12px 24px', border: '1px solid rgba(229, 231, 235, 1)', borderRadius: '9999px', color: 'rgba(55, 65, 81, 1)', fontWeight: 500, backgroundColor: 'white', cursor: 'pointer' }}>Anulează</button>
+              <button onClick={() => setShowInactivateStep2(true)} style={{ flex: 1, padding: '12px 24px', background: 'linear-gradient(180deg, rgba(245, 158, 11, 1) 0%, rgba(234, 88, 12, 1) 100%)', color: 'white', borderRadius: '9999px', fontWeight: 500, border: 'none', cursor: 'pointer' }}>Da, dezactivează</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* §13: Inactivation Confirmation - Step 2 (final) */}
+      {showInactivateConfirm && showInactivateStep2 && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} />
+          <div style={{ position: 'relative', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '480px', margin: '16px', padding: '32px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'rgba(245, 158, 11, 1)', marginBottom: '16px' }}>Confirmare finală dezactivare</h2>
+            <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '24px' }}>Ești absolut sigur? Template-ul nu va mai genera cheltuieli recurente din această lună.</p>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={() => { setShowInactivateStep2(false); setShowInactivateConfirm(false); }} disabled={saving} style={{ flex: 1, padding: '12px 24px', border: '1px solid rgba(229, 231, 235, 1)', borderRadius: '9999px', color: 'rgba(55, 65, 81, 1)', fontWeight: 500, backgroundColor: 'white', cursor: saving ? 'not-allowed' : 'pointer' }}>Anulează</button>
+              <button onClick={executeInactivation} disabled={saving} style={{ flex: 1, padding: '12px 24px', background: 'linear-gradient(180deg, rgba(245, 158, 11, 1) 0%, rgba(234, 88, 12, 1) 100%)', color: 'white', borderRadius: '9999px', fontWeight: 500, border: 'none', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>{saving ? 'Se salvează...' : 'Confirmă dezactivare'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* §10: Version Confirmation - Step 1 */}
+      {showVersionConfirm && !showVersionStep2 && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} onClick={() => { setShowVersionConfirm(false); setPendingUpdatePayload(null); }} />
+          <div style={{ position: 'relative', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '520px', margin: '16px', padding: '32px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'rgba(16, 24, 40, 1)', marginBottom: '16px' }}>Modificare template</h2>
+            <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '8px' }}>Ai modificat sumele template-ului. Aceasta va crea o versiune nouă a template-ului.</p>
+            <p style={{ color: 'rgba(245, 158, 11, 1)', fontWeight: 500, fontSize: '14px', marginBottom: '24px', backgroundColor: 'rgba(254, 243, 199, 0.5)', padding: '12px 16px', borderRadius: '8px' }}>
+              Template-ul curent va deveni inactiv. Cheltuielile generate anterior NU vor fi modificate.
+            </p>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={() => { setShowVersionConfirm(false); setPendingUpdatePayload(null); }} style={{ flex: 1, padding: '12px 24px', border: '1px solid rgba(229, 231, 235, 1)', borderRadius: '9999px', color: 'rgba(55, 65, 81, 1)', fontWeight: 500, backgroundColor: 'white', cursor: 'pointer' }}>Anulează</button>
+              <button onClick={() => setShowVersionStep2(true)} style={{ flex: 1, padding: '12px 24px', background: 'linear-gradient(180deg, rgba(0, 212, 146, 1) 0%, rgba(81, 162, 255, 1) 100%)', color: 'white', borderRadius: '9999px', fontWeight: 500, border: 'none', cursor: 'pointer' }}>Da, continuă</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* §10: Version Confirmation - Step 2 with Month Picker */}
+      {showVersionConfirm && showVersionStep2 && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} />
+          <div style={{ position: 'relative', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '520px', margin: '16px', padding: '32px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'rgba(16, 24, 40, 1)', marginBottom: '16px' }}>Selectează prima lună activă</h2>
+            <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '20px' }}>Din ce lună va fi activ noul template? Cheltuielile generate anterior nu vor fi afectate.</p>
+            
+            {/* Year navigation */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <button onClick={() => setVersionStartYear(y => y - 1)} style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', color: 'rgba(107, 114, 128, 1)' }}>
+                <ChevronDown size={18} style={{ transform: 'rotate(90deg)' }} />
+              </button>
+              <span style={{ fontSize: '16px', fontWeight: 600, color: 'rgba(17, 24, 39, 1)' }}>{versionStartYear}</span>
+              <button onClick={() => setVersionStartYear(y => y + 1)} style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', color: 'rgba(107, 114, 128, 1)' }}>
+                <ChevronDown size={18} style={{ transform: 'rotate(-90deg)' }} />
+              </button>
+            </div>
+
+            {/* Month grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '24px' }}>
+              {['Ian', 'Feb', 'Mar', 'Apr', 'Mai', 'Iun', 'Iul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, idx) => {
+                const isSelected = versionStartMonth === idx;
+                return (
+                  <button
+                    key={month}
+                    onClick={() => setVersionStartMonth(idx)}
+                    style={{
+                      padding: '12px 8px',
+                      backgroundColor: isSelected ? 'rgba(240, 253, 250, 1)' : 'transparent',
+                      border: isSelected ? '2px solid rgba(13, 148, 136, 0.6)' : '1px solid rgba(229, 231, 235, 0.6)',
+                      borderRadius: '10px',
+                      color: isSelected ? 'rgba(13, 148, 136, 1)' : 'rgba(55, 65, 81, 1)',
+                      fontSize: '14px',
+                      fontWeight: isSelected ? 600 : 400,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    {month}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={() => { setShowVersionStep2(false); setShowVersionConfirm(false); setPendingUpdatePayload(null); }} style={{ flex: 1, padding: '12px 24px', border: '1px solid rgba(229, 231, 235, 1)', borderRadius: '9999px', color: 'rgba(55, 65, 81, 1)', fontWeight: 500, backgroundColor: 'white', cursor: 'pointer' }}>Anulează</button>
+              <button onClick={executeVersionedUpdate} disabled={saving} style={{ flex: 1, padding: '12px 24px', background: saving ? 'rgba(156, 163, 175, 1)' : 'linear-gradient(180deg, rgba(0, 212, 146, 1) 0%, rgba(81, 162, 255, 1) 100%)', color: 'white', borderRadius: '9999px', fontWeight: 500, border: 'none', cursor: saving ? 'not-allowed' : 'pointer' }}>{saving ? 'Se salvează...' : 'Confirmă și salvează'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

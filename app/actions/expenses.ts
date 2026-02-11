@@ -93,6 +93,7 @@ export interface ExpenseFilters {
   responsibleId?: string;
   tags?: string[];
   search?: string;
+  includeDeleted?: boolean;
 }
 
 export interface PaginationOptions {
@@ -130,6 +131,7 @@ export interface TeamExpenseListItem {
   responsible_id: string | null;
   user_id: string;
   tags: string[] | null;
+  deleted_at: string | null;
 }
 
 // Fields needed for list view (optimized - smaller payload)
@@ -153,7 +155,8 @@ const EXPENSE_LIST_FIELDS = `
   is_recurring_placeholder,
   responsible_id,
   user_id,
-  tags
+  tags,
+  deleted_at
 ` as const;
 
 // Get expenses with optional filters
@@ -165,8 +168,12 @@ export async function getTeamExpenses(
   let query = supabase
     .from("team_expenses")
     .select(EXPENSE_LIST_FIELDS)
-    .eq("team_id", teamId)
-    .is("deleted_at", null);
+    .eq("team_id", teamId);
+
+  // Only exclude deleted items unless explicitly requested
+  if (!filters?.includeDeleted) {
+    query = query.is("deleted_at", null);
+  }
 
   // Apply filters
   if (filters?.status) {
@@ -515,14 +522,17 @@ export async function deleteExpense(expenseId: string, teamId: string): Promise<
 
   await logExpenseAudit(expenseId, teamId, user.id, "deleted", current, null);
 
-  // FR-7: If this expense was linked to a recurring instance, reopen the instance
-  if (current?.recurring_instance_id) {
+  // If this was a RE-Form (linked to recurring template), regenerate a fresh one
+  // The generate_recurring_forms function will create a new 'recurent' row since the old one is soft-deleted
+  if (current?.recurring_expense_id && current?.accounting_period) {
     try {
-      const { reopenInstance } = await import("./recurring-instances");
-      await reopenInstance(current.recurring_instance_id, teamId);
-      console.log(`[deleteExpense] Reopened instance ${current.recurring_instance_id}`);
+      const [yearStr, monthStr] = current.accounting_period.split('-');
+      const targetMonth = new Date(parseInt(yearStr), parseInt(monthStr) - 1, 1);
+      const { generateRecurringForms } = await import("./recurring-expenses");
+      const count = await generateRecurringForms(teamId, targetMonth);
+      console.log(`[deleteExpense] Regenerated ${count} RE-Form(s) for ${current.accounting_period}`);
     } catch (error) {
-      console.error("[deleteExpense] Failed to reopen instance:", error);
+      console.error("[deleteExpense] Failed to regenerate RE-Form:", error);
       // Non-fatal, log and continue
     }
   }
