@@ -84,7 +84,15 @@ function PaymentIcon({ paid }: { paid: boolean }) {
   );
 }
 
-function MonthPaymentIcon({ paid, exists }: { paid: boolean; exists: boolean }) {
+function MonthPaymentIcon({ paid, exists, skipped }: { paid: boolean; exists: boolean; skipped?: boolean }) {
+  if (skipped) {
+    // Skipped month — gray circle with dash
+    return (
+      <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(243, 244, 246, 1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ color: 'rgba(156, 163, 175, 1)', fontSize: '16px', fontWeight: 600, lineHeight: 1 }}>–</span>
+      </div>
+    );
+  }
   if (!exists) {
     // No RE-Form for this month — dashed circle
     return (
@@ -1610,19 +1618,22 @@ export default function ExpensesPage() {
                           const yearExpKey = `${monthInfo.year}-${englishMonthKey}`;
                           const expId = expenseIds?.[yearExpKey] ?? expenseIds?.[englishMonthKey];
                           const hasExpense = !!expId;
+
+                          const skippedMonths = (expense as any).skippedMonths as Record<string, boolean> | undefined;
+                          const isSkipped = skippedMonths?.[yearMonthKey] ?? skippedMonths?.[englishMonthKey] ?? false;
                           
                           return (
                             <td key={`${monthInfo.year}-${monthInfo.index}-${idx}`} style={{ width: '81.8px' }}>
                               <div 
-                                style={{ display: 'flex', justifyContent: 'center', cursor: hasExpense ? 'pointer' : 'default' }}
+                                style={{ display: 'flex', justifyContent: 'center', cursor: hasExpense && !isSkipped ? 'pointer' : 'default' }}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (expId) {
+                                  if (expId && !isSkipped) {
                                     router.push(`/dashboard/${params.teamId}/expenses/${expId}`);
                                   }
                                 }}
                               >
-                                <MonthPaymentIcon paid={isPaid} exists={hasExpense} />
+                                <MonthPaymentIcon paid={isPaid} exists={hasExpense} skipped={isSkipped} />
                               </div>
                             </td>
                           );

@@ -28,6 +28,9 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 // Max line items per document
 const MAX_LINE_ITEMS = 5;
 
+type AmountField = "sumaCuTVA" | "sumaFaraTVA" | "tva" | "cotaTVA";
+const ALL_AMOUNT_FIELDS: AmountField[] = ["sumaCuTVA", "sumaFaraTVA", "tva", "cotaTVA"];
+
 interface TransactionLine {
   descriere: string;
   sumaCuTVA: string;
@@ -39,8 +42,21 @@ interface TransactionLine {
   subcategoryId: string;
   tvaDeductibil: string;
   tags: string;
-  manualFields: ("sumaCuTVA" | "sumaFaraTVA" | "tva")[];
-  calculatedField: "sumaCuTVA" | "sumaFaraTVA" | "tva" | null;
+  manualFields: AmountField[];
+}
+
+// Check if a field is system-calculated (not manually entered by user)
+function isFieldCalculated(line: TransactionLine, field: AmountField): boolean {
+  return line.manualFields.length >= 2 && !line.manualFields.includes(field);
+}
+
+// Check if VAT rate is valid (must be 11% or 21%)
+function isVatRateValid(cotaTVA: string): boolean {
+  if (!cotaTVA || cotaTVA.trim() === '' || cotaTVA === '-') return true; // No rate yet, no error
+  const rate = parseFloat(cotaTVA.replace('%', '').replace(',', '.').trim());
+  if (isNaN(rate)) return true;
+  // Allow small floating point tolerance
+  return Math.abs(rate - 11) < 0.01 || Math.abs(rate - 21) < 0.01;
 }
 
 interface Props {
@@ -100,37 +116,58 @@ function formatTagsInput(value: string): string {
   }).filter(t => t).join("");
 }
 
-// Smart VAT auto-calculation
-function calculateVATFromTwoFields(
-  field1: "sumaCuTVA" | "sumaFaraTVA" | "tva",
+// Smart VAT auto-calculation from any 2 of 4 fields
+// Relationships: sumaCuTVA = sumaFaraTVA + tva, tva = sumaFaraTVA * cotaTVA/100
+function calculateVATFields(
+  field1: AmountField,
   value1: number,
-  field2: "sumaCuTVA" | "sumaFaraTVA" | "tva",
+  field2: AmountField,
   value2: number
-): { sumaCuTVA: number; sumaFaraTVA: number; tva: number; cotaTVA: number; calculatedField: "sumaCuTVA" | "sumaFaraTVA" | "tva" } {
-  let sumaCuTVA = 0, sumaFaraTVA = 0, tva = 0;
-  let calculatedField: "sumaCuTVA" | "sumaFaraTVA" | "tva";
+): { sumaCuTVA: number; sumaFaraTVA: number; tva: number; cotaTVA: number } {
+  const known: Partial<Record<AmountField, number>> = {};
+  known[field1] = value1;
+  known[field2] = value2;
 
-  if (field1 === "sumaCuTVA") sumaCuTVA = value1;
-  else if (field1 === "sumaFaraTVA") sumaFaraTVA = value1;
-  else tva = value1;
+  const S = known.sumaCuTVA;
+  const F = known.sumaFaraTVA;
+  const T = known.tva;
+  const C = known.cotaTVA;
 
-  if (field2 === "sumaCuTVA") sumaCuTVA = value2;
-  else if (field2 === "sumaFaraTVA") sumaFaraTVA = value2;
-  else tva = value2;
+  let sumaCuTVA = 0, sumaFaraTVA = 0, tva = 0, cotaTVA = 0;
 
-  if (field1 !== "sumaCuTVA" && field2 !== "sumaCuTVA") {
-    sumaCuTVA = sumaFaraTVA + tva;
-    calculatedField = "sumaCuTVA";
-  } else if (field1 !== "sumaFaraTVA" && field2 !== "sumaFaraTVA") {
-    sumaFaraTVA = sumaCuTVA - tva;
-    calculatedField = "sumaFaraTVA";
-  } else {
+  if (S !== undefined && F !== undefined) {
+    // Case 1: S + F → T, C
+    sumaCuTVA = S; sumaFaraTVA = F;
+    tva = S - F;
+    cotaTVA = F > 0 ? (tva / F) * 100 : 0;
+  } else if (S !== undefined && T !== undefined) {
+    // Case 2: S + T → F, C
+    sumaCuTVA = S; tva = T;
+    sumaFaraTVA = S - T;
+    cotaTVA = sumaFaraTVA > 0 ? (tva / sumaFaraTVA) * 100 : 0;
+  } else if (S !== undefined && C !== undefined) {
+    // Case 3: S + C → F, T
+    sumaCuTVA = S; cotaTVA = C;
+    sumaFaraTVA = C > 0 ? S / (1 + C / 100) : S;
     tva = sumaCuTVA - sumaFaraTVA;
-    calculatedField = "tva";
+  } else if (F !== undefined && T !== undefined) {
+    // Case 4: F + T → S, C
+    sumaFaraTVA = F; tva = T;
+    sumaCuTVA = F + T;
+    cotaTVA = F > 0 ? (T / F) * 100 : 0;
+  } else if (F !== undefined && C !== undefined) {
+    // Case 5: F + C → T, S
+    sumaFaraTVA = F; cotaTVA = C;
+    tva = F * (C / 100);
+    sumaCuTVA = F + tva;
+  } else if (T !== undefined && C !== undefined) {
+    // Case 6: T + C → F, S
+    tva = T; cotaTVA = C;
+    sumaFaraTVA = C > 0 ? T / (C / 100) : 0;
+    sumaCuTVA = sumaFaraTVA + tva;
   }
 
-  const cotaTVA = sumaFaraTVA > 0 ? (tva / sumaFaraTVA) * 100 : 0;
-  return { sumaCuTVA, sumaFaraTVA, tva, cotaTVA, calculatedField };
+  return { sumaCuTVA, sumaFaraTVA, tva, cotaTVA };
 }
 
 // Convert "noiembrie 2025" to "2025-11" for accountingPeriod
@@ -293,7 +330,6 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
       tvaDeductibil: "Da",
       tags: "",
       manualFields: [],
-      calculatedField: null,
     },
   ]);
 
@@ -413,14 +449,13 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
           tva: expense.amount_with_vat && expense.amount_without_vat 
             ? formatAmount(expense.amount_with_vat - expense.amount_without_vat) 
             : "",
-          cotaTVA: expense.vat_rate ? `${expense.vat_rate.toFixed(2)}%` : "",
+          cotaTVA: expense.vat_rate ? expense.vat_rate.toFixed(2) : "",
           lunaP: convertFromAccountingPeriod(expense.accounting_period, defaultMonthYear),
           categoryId: expense.category_id || "",
           subcategoryId: expense.subcategory_id || "",
           tvaDeductibil: expense.vat_deductible ? "Da" : "Nu",
           tags: expense.tags?.join(", ") || "",
           manualFields: [],
-          calculatedField: null,
         }]);
       } catch (err) {
         console.error("Failed to load expense:", err);
@@ -575,58 +610,72 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
       const newLines = [...prevLines];
       const line = { ...newLines[index] };
       
-      if (field === "sumaCuTVA" || field === "sumaFaraTVA" || field === "tva") {
-        // TVA is always calculated, never manually editable
-        if (field === "tva") {
-          // Don't allow manual editing of TVA
-          return newLines;
+      if (field === "sumaCuTVA" || field === "sumaFaraTVA" || field === "tva" || field === "cotaTVA") {
+        const amountField = field as AmountField;
+        
+        // If this field is currently calculated and user tries to edit, reset first
+        if (isFieldCalculated(line, amountField) && value.trim() !== "") {
+          // User wants to change a calculated field — reset all and start fresh
+          line.sumaCuTVA = "";
+          line.sumaFaraTVA = "";
+          line.tva = "";
+          line.cotaTVA = "";
+          line.manualFields = [];
         }
         
         line[field] = value;
         
-        const amountField = field as "sumaCuTVA" | "sumaFaraTVA";
-        // Only sumaCuTVA and sumaFaraTVA can be manual fields
+        // Track manual fields
         if (!line.manualFields.includes(amountField) && value.trim() !== "") {
-          line.manualFields = [...line.manualFields.filter(f => f !== "tva"), amountField];
+          // If we already have 2 manual fields and this is a new one, don't add
+          if (line.manualFields.length < 2) {
+            line.manualFields = [...line.manualFields, amountField];
+          }
         }
         
+        // Remove from manual if cleared
         if (value.trim() === "" || value === "0" || value === "0,00") {
           line.manualFields = line.manualFields.filter(f => f !== amountField);
+          // Clear calculated fields when we no longer have 2 inputs
+          ALL_AMOUNT_FIELDS.forEach(f => {
+            if (!line.manualFields.includes(f)) {
+              line[f] = f === amountField ? value : "";
+            }
+          });
         }
         
-        // Remove TVA from manualFields if it was somehow added
-        line.manualFields = line.manualFields.filter(f => f !== "tva");
-        
+        // Calculate remaining 2 fields when exactly 2 manual fields are filled
         const filledFields = line.manualFields.filter(f => {
           const val = line[f];
           return val && val.trim() !== "" && val !== "0" && val !== "0,00";
         });
         
-        // Always calculate TVA when both sumaCuTVA and sumaFaraTVA are filled
         if (filledFields.length === 2) {
-          const [field1, field2] = filledFields;
-          const value1 = parseAmount(line[field1]);
-          const value2 = parseAmount(line[field2]);
+          const [f1, f2] = filledFields;
+          const v1 = f1 === "cotaTVA" ? parseFloat(line[f1].replace('%', '').replace(',', '.')) || 0 : parseAmount(line[f1]);
+          const v2 = f2 === "cotaTVA" ? parseFloat(line[f2].replace('%', '').replace(',', '.')) || 0 : parseAmount(line[f2]);
           
-          if (value1 > 0 || value2 > 0) {
-            const result = calculateVATFromTwoFields(field1, value1, field2, value2);
+          if (v1 > 0 || v2 > 0) {
+            const result = calculateVATFields(f1, v1, f2, v2);
             
-            if (result.calculatedField === "sumaCuTVA") {
-              line.sumaCuTVA = formatAmount(result.sumaCuTVA.toFixed(2));
-            } else if (result.calculatedField === "sumaFaraTVA") {
-              line.sumaFaraTVA = formatAmount(result.sumaFaraTVA.toFixed(2));
-            } else {
-              // TVA is always calculated
-              line.tva = formatAmount(result.tva.toFixed(2));
-            }
-            
-            line.calculatedField = result.calculatedField;
-            line.cotaTVA = result.cotaTVA.toFixed(2) + "%";
+            // Update only the calculated (non-manual) fields
+            ALL_AMOUNT_FIELDS.forEach(f => {
+              if (!filledFields.includes(f)) {
+                if (f === "cotaTVA") {
+                  line.cotaTVA = result.cotaTVA.toFixed(2);
+                } else {
+                  line[f] = formatAmount(result[f].toFixed(2));
+                }
+              }
+            });
           }
         } else if (filledFields.length < 2) {
-          line.calculatedField = null;
-          line.cotaTVA = "";
-          line.tva = ""; // Clear TVA when not enough fields are filled
+          // Clear any previously calculated fields
+          ALL_AMOUNT_FIELDS.forEach(f => {
+            if (!line.manualFields.includes(f)) {
+              line[f] = "";
+            }
+          });
         }
       } else if (field === "tags") {
         // Auto-format tags: ensure each tag starts with #
@@ -642,19 +691,33 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   }, []);
 
   // Format amount on blur
-  const handleAmountBlur = useCallback((index: number, field: "sumaCuTVA" | "sumaFaraTVA" | "tva") => {
+  const handleAmountBlur = useCallback((index: number, field: AmountField) => {
     setLines(prevLines => {
       const newLines = [...prevLines];
       const line = { ...newLines[index] };
       const currentValue = line[field];
       
-      if (currentValue && currentValue.trim() !== "" && line.calculatedField !== field) {
-        const numValue = parseAmount(currentValue);
-        if (numValue > 0) {
-          line[field] = formatAmount(numValue);
-        } else if (currentValue.trim() !== "") {
-          line[field] = "";
-          line.manualFields = line.manualFields.filter(f => f !== field);
+      // Don't reformat calculated fields
+      if (isFieldCalculated(line, field)) return newLines;
+      
+      if (currentValue && currentValue.trim() !== "") {
+        if (field === "cotaTVA") {
+          // Format cotaTVA as plain number (no % sign in the stored value)
+          const numValue = parseFloat(currentValue.replace('%', '').replace(',', '.'));
+          if (numValue > 0) {
+            line.cotaTVA = numValue.toFixed(2);
+          } else {
+            line.cotaTVA = "";
+            line.manualFields = line.manualFields.filter(f => f !== field);
+          }
+        } else {
+          const numValue = parseAmount(currentValue);
+          if (numValue > 0) {
+            line[field] = formatAmount(numValue);
+          } else {
+            line[field] = "";
+            line.manualFields = line.manualFields.filter(f => f !== field);
+          }
         }
       }
       
@@ -674,7 +737,6 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         tva: "",
         cotaTVA: "",
         manualFields: [],
-        calculatedField: null,
       };
       return newLines;
     });
@@ -701,7 +763,6 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         tvaDeductibil: "Da",
         tags: "",
         manualFields: [],
-        calculatedField: null,
       },
     ]);
   };
@@ -720,11 +781,16 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
       
       if (!line.descriere.trim()) missing.push(`${linePrefix}Descriere`);
       
-      const filledAmounts = [line.sumaCuTVA, line.sumaFaraTVA, line.tva].filter(
-        v => v && v.trim() !== "" && v !== "0" && v !== "0,00"
+      const filledAmounts = [line.sumaCuTVA, line.sumaFaraTVA, line.tva, line.cotaTVA].filter(
+        v => v && v.trim() !== "" && v !== "0" && v !== "0,00" && v !== "-"
       ).length;
       if (filledAmounts < 2) {
-        missing.push(`${linePrefix}Minim 2 campuri pentru sume`);
+        missing.push(`${linePrefix}Minim 2 campuri pentru sume/TVA`);
+      }
+      
+      // VAT rate validation: must be 11% or 21%
+      if (line.cotaTVA && line.cotaTVA.trim() !== '' && !isVatRateValid(line.cotaTVA)) {
+        missing.push(`${linePrefix}Cota TVA trebuie sa fie 11% sau 21%`);
       }
       
       if (!line.categoryId) missing.push(`${linePrefix}Cont`);
@@ -743,12 +809,16 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         return !line.descriere.trim();
       case 'sumaCuTVA':
       case 'sumaFaraTVA':
-      case 'tva':
+      case 'tva': {
         // Check if at least 2 amount fields are filled
-        const filledAmounts = [line.sumaCuTVA, line.sumaFaraTVA, line.tva].filter(
-          v => v && v.trim() !== "" && v !== "0" && v !== "0,00"
+        const filledAmounts = [line.sumaCuTVA, line.sumaFaraTVA, line.tva, line.cotaTVA].filter(
+          v => v && v.trim() !== "" && v !== "0" && v !== "0,00" && v !== "-"
         ).length;
         return filledAmounts < 2;
+      }
+      case 'cotaTVA':
+        // Show error if VAT rate is filled but not 11% or 21%
+        return !isVatRateValid(line.cotaTVA);
       case 'categoryId':
         return !line.categoryId;
       case 'subcategoryId':
@@ -816,6 +886,16 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
     
     // Show validation errors on fields
     setShowValidationErrors(true);
+    
+    // Hard block: invalid VAT rate prevents any save (not even draft)
+    const hasInvalidVatRate = lines.some(line => 
+      line.cotaTVA && line.cotaTVA.trim() !== '' && !isVatRateValid(line.cotaTVA)
+    );
+    if (hasInvalidVatRate) {
+      setMissingFields(["Cota TVA trebuie sa fie 11% sau 21%"]);
+      setShowDraftConfirmModal(false);
+      return;
+    }
     
     if (missing.length > 0 && !forceDraft) {
       setMissingFields(missing);
@@ -1381,16 +1461,16 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                         value={line.sumaCuTVA}
                         onChange={(e) => updateLine(index, "sumaCuTVA", e.target.value)}
                         onBlur={() => handleAmountBlur(index, "sumaCuTVA")}
-                        readOnly={line.calculatedField === "sumaCuTVA"}
+                        readOnly={isFieldCalculated(line, "sumaCuTVA")}
                         className={hasFieldError(index, 'sumaCuTVA') ? 'error-placeholder' : 'normal-placeholder'}
                         style={{ 
                           paddingRight: '70px', 
-                          backgroundColor: line.calculatedField === "sumaCuTVA" ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'sumaCuTVA') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
+                          backgroundColor: isFieldCalculated(line, "sumaCuTVA") ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'sumaCuTVA') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
                           borderColor: hasFieldError(index, 'sumaCuTVA') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'
                         }} 
                       />
                       <div style={{ position: 'absolute', right: '16px', top: '9px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {line.calculatedField === "sumaCuTVA" && (
+                        {isFieldCalculated(line, "sumaCuTVA") && (
                           <button onClick={() => resetAmountFields(index)} style={{ ...buttonBaseStyle, background: 'none', padding: '2px' }}>
                             <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
                           </button>
@@ -1410,16 +1490,16 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                         value={line.sumaFaraTVA}
                         onChange={(e) => updateLine(index, "sumaFaraTVA", e.target.value)}
                         onBlur={() => handleAmountBlur(index, "sumaFaraTVA")}
-                        readOnly={line.calculatedField === "sumaFaraTVA"}
+                        readOnly={isFieldCalculated(line, "sumaFaraTVA")}
                         className={hasFieldError(index, 'sumaFaraTVA') ? 'error-placeholder' : 'normal-placeholder'}
                         style={{ 
                           paddingRight: '70px', 
-                          backgroundColor: line.calculatedField === "sumaFaraTVA" ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'sumaFaraTVA') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
+                          backgroundColor: isFieldCalculated(line, "sumaFaraTVA") ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'sumaFaraTVA') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
                           borderColor: hasFieldError(index, 'sumaFaraTVA') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'
                         }} 
                       />
                       <div style={{ position: 'absolute', right: '16px', top: '9px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {line.calculatedField === "sumaFaraTVA" && (
+                        {isFieldCalculated(line, "sumaFaraTVA") && (
                           <button onClick={() => resetAmountFields(index)} style={{ ...buttonBaseStyle, background: 'none', padding: '2px' }}>
                             <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
                           </button>
@@ -1437,17 +1517,22 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                       <TextInput 
                         placeholder="0,00"
                         value={line.tva}
-                        readOnly={true}
-                        disabled={true}
+                        onChange={(e) => updateLine(index, "tva", e.target.value)}
+                        onBlur={() => handleAmountBlur(index, "tva")}
+                        readOnly={isFieldCalculated(line, "tva")}
                         className={hasFieldError(index, 'tva') ? 'error-placeholder' : 'normal-placeholder'}
                         style={{ 
                           paddingRight: '70px', 
-                          backgroundColor: 'rgba(243, 244, 246, 0.5)',
-                          borderColor: hasFieldError(index, 'tva') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)',
-                          cursor: 'not-allowed'
+                          backgroundColor: isFieldCalculated(line, "tva") ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'tva') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
+                          borderColor: hasFieldError(index, 'tva') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'
                         }} 
                       />
                       <div style={{ position: 'absolute', right: '16px', top: '9px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {isFieldCalculated(line, "tva") && (
+                          <button onClick={() => resetAmountFields(index)} style={{ ...buttonBaseStyle, background: 'none', padding: '2px' }}>
+                            <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                          </button>
+                        )}
                         <span style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>Lei</span>
                         <span style={{ fontSize: '12px' }}>🇷🇴</span>
                       </div>
@@ -1456,10 +1541,33 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
 
                   {/* Cota TVA */}
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <label style={{ width: '128px', color: 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Cota TVA (%)</label>
-                    <div style={{ width: '296px', height: '36px', padding: '0 16px', backgroundColor: 'rgba(243, 244, 246, 0.5)', border: '1px solid rgba(209, 213, 220, 0.5)', borderRadius: '9999px', display: 'flex', alignItems: 'center' }}>
-                      <span style={{ color: 'rgba(74, 85, 101, 0.5)', fontSize: '14px' }}>{line.cotaTVA || '-'}</span>
+                    <label style={{ width: '128px', color: hasFieldError(index, 'cotaTVA') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Cota TVA (%)</label>
+                    <div style={{ position: 'relative', width: '296px' }}>
+                      <TextInput 
+                        placeholder="ex: 21"
+                        value={line.cotaTVA}
+                        onChange={(e) => updateLine(index, "cotaTVA", e.target.value)}
+                        onBlur={() => handleAmountBlur(index, "cotaTVA")}
+                        readOnly={isFieldCalculated(line, "cotaTVA")}
+                        className={hasFieldError(index, 'cotaTVA') ? 'error-placeholder' : 'normal-placeholder'}
+                        style={{ 
+                          paddingRight: '50px', 
+                          backgroundColor: isFieldCalculated(line, "cotaTVA") ? 'rgba(243, 244, 246, 0.5)' : hasFieldError(index, 'cotaTVA') ? errorBgStyle : 'rgba(255, 255, 255, 0.7)',
+                          borderColor: hasFieldError(index, 'cotaTVA') ? errorBorderStyle : 'rgba(209, 213, 220, 0.5)'
+                        }} 
+                      />
+                      <div style={{ position: 'absolute', right: '16px', top: '9px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {isFieldCalculated(line, "cotaTVA") && (
+                          <button onClick={() => resetAmountFields(index)} style={{ ...buttonBaseStyle, background: 'none', padding: '2px' }}>
+                            <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                          </button>
+                        )}
+                        <span style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>%</span>
+                      </div>
                     </div>
+                    {hasFieldError(index, 'cotaTVA') && (
+                      <span style={{ color: errorTextStyle, fontSize: '11px', whiteSpace: 'nowrap' }}>Doar 11% sau 21%</span>
+                    )}
                   </div>
 
                   {/* Luna P&L */}

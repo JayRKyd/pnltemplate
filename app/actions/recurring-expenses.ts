@@ -614,6 +614,77 @@ export async function getTemplateExpenses(
   }).filter(e => e.year === year);
 }
 
+// Skip a month for a recurring template (mark RE-Form as 'skipped')
+export async function skipRecurringMonth(
+  templateId: string,
+  teamId: string,
+  year: number,
+  month: number // 1-indexed
+): Promise<void> {
+  const accountingPeriod = `${year}-${String(month).padStart(2, '0')}`;
+  
+  // Find the RE-Form for this template and month
+  const { data: expense, error: findError } = await supabase
+    .from("team_expenses")
+    .select("id")
+    .eq("team_id", teamId)
+    .eq("recurring_expense_id", templateId)
+    .eq("accounting_period", accountingPeriod)
+    .is("deleted_at", null)
+    .single();
+
+  if (findError && findError.code !== 'PGRST116') {
+    console.error("[skipRecurringMonth] Find error:", findError);
+  }
+
+  if (expense) {
+    const { error } = await supabase
+      .from("team_expenses")
+      .update({ status: 'skipped' })
+      .eq("id", expense.id);
+
+    if (error) {
+      console.error("[skipRecurringMonth] Update error:", error);
+      throw new Error(error.message);
+    }
+  }
+}
+
+// Unskip a month — restore RE-Form back to 'recurent' status
+export async function unskipRecurringMonth(
+  templateId: string,
+  teamId: string,
+  year: number,
+  month: number // 1-indexed
+): Promise<void> {
+  const accountingPeriod = `${year}-${String(month).padStart(2, '0')}`;
+  
+  const { data: expense, error: findError } = await supabase
+    .from("team_expenses")
+    .select("id")
+    .eq("team_id", teamId)
+    .eq("recurring_expense_id", templateId)
+    .eq("accounting_period", accountingPeriod)
+    .is("deleted_at", null)
+    .single();
+
+  if (findError && findError.code !== 'PGRST116') {
+    console.error("[unskipRecurringMonth] Find error:", findError);
+  }
+
+  if (expense) {
+    const { error } = await supabase
+      .from("team_expenses")
+      .update({ status: 'recurent' })
+      .eq("id", expense.id);
+
+    if (error) {
+      console.error("[unskipRecurringMonth] Update error:", error);
+      throw new Error(error.message);
+    }
+  }
+}
+
 // Get recurring expenses with monthly payment status for the list view
 export interface RecurringExpenseWithPayments extends RecurringExpense {
   payments: {
@@ -630,6 +701,7 @@ export interface RecurringExpenseWithPayments extends RecurringExpense {
     nov?: boolean;
     dec?: boolean;
   };
+  skippedMonths: Record<string, boolean>; // monthKey → true if skipped
   expenseIds: Record<string, string>; // monthKey → team_expenses.id for navigation
   category_name?: string;
   subcategory_name?: string;
@@ -702,8 +774,9 @@ export async function getRecurringExpensesWithPayments(
     console.error("[getRecurringExpensesWithPayments] Expenses error:", expError);
   }
 
-  // Build payments map and expenseIds map from team_expenses (single source of truth)
+  // Build payments map, skipped map, and expenseIds map from team_expenses (single source of truth)
   const paymentsMap = new Map<string, Record<string, boolean>>();
+  const skippedMap = new Map<string, Record<string, boolean>>();
   const expenseIdsMap = new Map<string, Record<string, string>>();
   const monthKeys = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
@@ -753,18 +826,28 @@ export async function getRecurringExpensesWithPayments(
     if (!paymentsMap.has(activeId)) {
       paymentsMap.set(activeId, {});
     }
+    if (!skippedMap.has(activeId)) {
+      skippedMap.set(activeId, {});
+    }
     if (!expenseIdsMap.has(activeId)) {
       expenseIdsMap.set(activeId, {});
     }
 
     const payments = paymentsMap.get(activeId)!;
+    const skipped = skippedMap.get(activeId)!;
     const ids = expenseIdsMap.get(activeId)!;
-    // X = status is 'recurent' (not yet touched by user)
-    // ✓ = status is 'draft' or 'final' (user has edited/finalized)
-    const isDone = exp.status === 'draft' || exp.status === 'final';
     const yearMonthKey = `${year}-${monthKey}`;
-    payments[monthKey] = isDone;
-    payments[yearMonthKey] = isDone;
+
+    if (exp.status === 'skipped') {
+      skipped[monthKey] = true;
+      skipped[yearMonthKey] = true;
+    } else {
+      // X = status is 'recurent' (not yet touched by user)
+      // ✓ = status is 'draft' or 'final' (user has edited/finalized)
+      const isDone = exp.status === 'draft' || exp.status === 'final';
+      payments[monthKey] = isDone;
+      payments[yearMonthKey] = isDone;
+    }
     ids[monthKey] = exp.id;
     ids[yearMonthKey] = exp.id;
   });
@@ -775,6 +858,7 @@ export async function getRecurringExpensesWithPayments(
     category_name: rec.category?.name,
     subcategory_name: rec.subcategory?.name,
     payments: paymentsMap.get(rec.id) || {},
+    skippedMonths: skippedMap.get(rec.id) || {},
     expenseIds: expenseIdsMap.get(rec.id) || {}
   }));
 }

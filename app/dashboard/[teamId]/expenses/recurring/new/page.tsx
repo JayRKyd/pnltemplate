@@ -2,15 +2,14 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { X, ChevronDown, Check } from 'lucide-react';
+import { X, ChevronDown, Check, Pencil } from 'lucide-react';
 import { getCategoryTree, CategoryWithChildren } from '@/app/actions/categories';
-import { createRecurringExpense, updateRecurringPaymentStatus, generateRecurringForms } from '@/app/actions/recurring-expenses';
+import { createRecurringExpense, generateRecurringForms } from '@/app/actions/recurring-expenses';
 
-interface MonthPayment {
-  month: string;
-  year: number;
-  paid: boolean;
-}
+const ROMANIAN_MONTHS = [
+  'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
+  'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
+];
 
 export default function NewRecurringExpensePage() {
   const params = useParams<{ teamId: string }>();
@@ -28,33 +27,19 @@ export default function NewRecurringExpensePage() {
   const [sumaCuTVA, setSumaCuTVA] = useState('');
   const [sumaFaraTVA, setSumaFaraTVA] = useState('');
   const [tva, setTva] = useState('');
+  const [cotaTVA, setCotaTVA] = useState('');
+  const [manualFields, setManualFields] = useState<string[]>([]);
+  const [vatError, setVatError] = useState('');
   
   const [categories, setCategories] = useState<CategoryWithChildren[]>([]);
   const [showContDropdown, setShowContDropdown] = useState(false);
   const [showSubcontDropdown, setShowSubcontDropdown] = useState(false);
   
-  // Monthly payments state - 12 months
-  const [monthlyPayments, setMonthlyPayments] = useState<MonthPayment[]>([]);
-
-  // Generate months for current year (all 12 months of 2026)
-  useEffect(() => {
-    const months: MonthPayment[] = [];
-    const currentYear = new Date().getFullYear();
-    const romanianMonths = [
-      'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
-      'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
-    ];
-    
-    // Show all 12 months of current year
-    for (let i = 0; i < 12; i++) {
-      months.push({
-        month: romanianMonths[i],
-        year: currentYear,
-        paid: false // Default to unpaid
-      });
-    }
-    setMonthlyPayments(months);
-  }, []);
+  // ACTIV DIN month picker state
+  const [selectedStartMonth, setSelectedStartMonth] = useState<number | null>(null); // 0-indexed
+  const [selectedStartYear, setSelectedStartYear] = useState<number>(new Date().getFullYear());
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [pickerYear, setPickerYear] = useState<number>(new Date().getFullYear());
 
   // Load categories
   useEffect(() => {
@@ -85,44 +70,155 @@ export default function NewRecurringExpensePage() {
     return category?.children || [];
   }, [categories, cont]);
 
-  // Calculate TVA when amounts change
-  useEffect(() => {
-    const cuTVA = parseAmount(sumaCuTVA);
-    const faraTVA = parseAmount(sumaFaraTVA);
-    
-    if (cuTVA > 0 && faraTVA > 0) {
-      const tvaAmount = cuTVA - faraTVA;
-      setTva(formatAmount(tvaAmount));
+  // VAT field helpers
+  type AmountField = 'sumaCuTVA' | 'sumaFaraTVA' | 'tva' | 'cotaTVA';
+  const ALL_FIELDS: AmountField[] = ['sumaCuTVA', 'sumaFaraTVA', 'tva', 'cotaTVA'];
+
+  const getFieldValue = (field: AmountField): string => {
+    if (field === 'sumaCuTVA') return sumaCuTVA;
+    if (field === 'sumaFaraTVA') return sumaFaraTVA;
+    if (field === 'tva') return tva;
+    return cotaTVA;
+  };
+
+  const setFieldValue = (field: AmountField, value: string) => {
+    if (field === 'sumaCuTVA') setSumaCuTVA(value);
+    else if (field === 'sumaFaraTVA') setSumaFaraTVA(value);
+    else if (field === 'tva') setTva(value);
+    else setCotaTVA(value);
+  };
+
+  const isFieldCalculated = (field: AmountField): boolean => {
+    return manualFields.length >= 2 && !manualFields.includes(field);
+  };
+
+  const isVatRateValid = (rate: string): boolean => {
+    if (!rate || rate.trim() === '') return true;
+    const num = parseFloat(rate.replace('%', '').replace(',', '.').trim());
+    if (isNaN(num)) return true;
+    return Math.abs(num - 11) < 0.01 || Math.abs(num - 21) < 0.01;
+  };
+
+  // Calculate remaining 2 fields from any 2 known fields
+  const calculateVATFields = (
+    f1: AmountField, v1: number, f2: AmountField, v2: number
+  ): Record<AmountField, number> => {
+    const known: Partial<Record<AmountField, number>> = {};
+    known[f1] = v1; known[f2] = v2;
+    const S = known.sumaCuTVA, F = known.sumaFaraTVA, T = known.tva, C = known.cotaTVA;
+    let sR = 0, fR = 0, tR = 0, cR = 0;
+
+    if (S !== undefined && F !== undefined) {
+      sR = S; fR = F; tR = S - F; cR = F > 0 ? (tR / F) * 100 : 0;
+    } else if (S !== undefined && T !== undefined) {
+      sR = S; tR = T; fR = S - T; cR = fR > 0 ? (tR / fR) * 100 : 0;
+    } else if (S !== undefined && C !== undefined) {
+      sR = S; cR = C; fR = C > 0 ? S / (1 + C / 100) : S; tR = sR - fR;
+    } else if (F !== undefined && T !== undefined) {
+      fR = F; tR = T; sR = F + T; cR = F > 0 ? (T / F) * 100 : 0;
+    } else if (F !== undefined && C !== undefined) {
+      fR = F; cR = C; tR = F * (C / 100); sR = F + tR;
+    } else if (T !== undefined && C !== undefined) {
+      tR = T; cR = C; fR = C > 0 ? T / (C / 100) : 0; sR = fR + tR;
     }
-  }, [sumaCuTVA, sumaFaraTVA]);
+    return { sumaCuTVA: sR, sumaFaraTVA: fR, tva: tR, cotaTVA: cR };
+  };
+
+  const handleAmountChange = (field: AmountField, value: string) => {
+    // If editing a calculated field, reset all
+    if (isFieldCalculated(field) && value.trim() !== '') {
+      setSumaCuTVA(''); setSumaFaraTVA(''); setTva(''); setCotaTVA('');
+      setManualFields([]);
+      setVatError('');
+    }
+
+    setFieldValue(field, value);
+
+    setManualFields(prev => {
+      let updated = [...prev];
+      if (value.trim() === '' || value === '0' || value === '0,00') {
+        updated = updated.filter(f => f !== field);
+      } else if (!updated.includes(field) && updated.length < 2) {
+        updated = [...updated, field];
+      }
+      return updated;
+    });
+  };
+
+  // Run calculation whenever manual fields or their values change
+  useEffect(() => {
+    const filled = manualFields.filter(f => {
+      const v = getFieldValue(f as AmountField);
+      return v && v.trim() !== '' && v !== '0' && v !== '0,00';
+    });
+
+    if (filled.length === 2) {
+      const [f1, f2] = filled as AmountField[];
+      const v1 = f1 === 'cotaTVA' ? parseFloat(getFieldValue(f1).replace('%','').replace(',','.')) || 0 : parseAmount(getFieldValue(f1));
+      const v2 = f2 === 'cotaTVA' ? parseFloat(getFieldValue(f2).replace('%','').replace(',','.')) || 0 : parseAmount(getFieldValue(f2));
+
+      if (v1 > 0 || v2 > 0) {
+        const result = calculateVATFields(f1, v1, f2, v2);
+        ALL_FIELDS.forEach(f => {
+          if (!filled.includes(f)) {
+            if (f === 'cotaTVA') {
+              setCotaTVA(result.cotaTVA.toFixed(2));
+            } else {
+              setFieldValue(f, formatAmount(result[f]));
+            }
+          }
+        });
+        // Validate VAT rate
+        const rateVal = filled.includes('cotaTVA') ? getFieldValue('cotaTVA') : result.cotaTVA.toFixed(2);
+        if (!isVatRateValid(rateVal)) {
+          setVatError('Cota TVA trebuie sa fie 11% sau 21%');
+        } else {
+          setVatError('');
+        }
+      }
+    } else {
+      // Clear calculated fields
+      ALL_FIELDS.forEach(f => {
+        if (!manualFields.includes(f)) {
+          setFieldValue(f as AmountField, '');
+        }
+      });
+      setVatError('');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualFields, sumaCuTVA, sumaFaraTVA, tva, cotaTVA]);
+
+  const resetAmountFields = () => {
+    setSumaCuTVA(''); setSumaFaraTVA(''); setTva(''); setCotaTVA('');
+    setManualFields([]);
+    setVatError('');
+  };
 
   const handleClose = () => {
     router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
   };
 
-  // Helper to get month index from Romanian name
-  const getMonthIndex = (monthName: string): number => {
-    const romanianMonths = [
-      'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
-      'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
-    ];
-    return romanianMonths.indexOf(monthName);
-  };
-
-  const toggleMonthPayment = (index: number) => {
-    setMonthlyPayments(prev => prev.map((mp, i) => 
-      i === index ? { ...mp, paid: !mp.paid } : mp
-    ));
-  };
-
   const handleSave = async () => {
     if (saving) return;
+    
+    // Require month selection
+    if (selectedStartMonth === null) {
+      alert('Selectează luna de start (Activ din)');
+      return;
+    }
+    
+    // Block save on invalid VAT rate
+    if (vatError) {
+      alert(vatError);
+      return;
+    }
     
     setSaving(true);
     try {
       const amountWithVat = parseAmount(sumaCuTVA);
       const amountWithoutVat = parseAmount(sumaFaraTVA);
       const amount = amountWithoutVat || amountWithVat;
+      const vatRate = cotaTVA ? parseFloat(cotaTVA.replace('%', '').replace(',', '.')) : undefined;
       
       // Create the recurring expense template
       const recurring = await createRecurringExpense({
@@ -130,6 +226,7 @@ export default function NewRecurringExpensePage() {
         amount: amount,
         amountWithVat: amountWithVat || undefined,
         amountWithoutVat: amountWithoutVat || undefined,
+        vatRate: vatRate,
         vatDeductible: tvaDeductibil === 'Da',
         categoryId: cont || undefined,
         subcategoryId: subcont || undefined,
@@ -138,7 +235,7 @@ export default function NewRecurringExpensePage() {
         tags: tags ? tags.split(',').map(t => t.trim()) : undefined,
         recurrenceType: 'monthly',
         dayOfMonth: 1,
-        startDate: new Date().toISOString().split('T')[0],
+        startDate: `${selectedStartYear}-${String((selectedStartMonth ?? 0) + 1).padStart(2, '0')}-01`,
       });
       
       // Generate RE-Forms for the current month (and any past months from start_date)
@@ -154,24 +251,8 @@ export default function NewRecurringExpensePage() {
         }
       }
 
-      // Save payment status for each toggled month
-      const currentYear = new Date().getFullYear();
-      for (const mp of monthlyPayments) {
-        if (mp.paid) {
-          try {
-            await updateRecurringPaymentStatus(
-              recurring.id,
-              params.teamId,
-              mp.year,
-              getMonthIndex(mp.month),
-              true // paid
-            );
-          } catch (err) {
-            console.error(`Failed to save payment status for ${mp.month} ${mp.year}:`, err);
-            // Continue with other months even if one fails
-          }
-        }
-      }
+      // Note: No payment status updates here — RE-Forms are generated with status 'recurent'
+      // and payment_status 'unpaid'. Users toggle payment status from the template detail page.
       
       router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
     } catch (error) {
@@ -219,7 +300,7 @@ export default function NewRecurringExpensePage() {
     }}>
       <div style={{
         width: '100%',
-        maxWidth: '920px',
+        maxWidth: '1060px',
         backgroundColor: 'white',
         borderRadius: '20px',
         boxShadow: '0px 4px 24px rgba(0, 0, 0, 0.06)',
@@ -549,19 +630,20 @@ export default function NewRecurringExpensePage() {
                 <input
                   type="text"
                   value={sumaCuTVA}
-                  onChange={(e) => setSumaCuTVA(e.target.value)}
+                  onChange={(e) => handleAmountChange('sumaCuTVA', e.target.value)}
+                  readOnly={isFieldCalculated('sumaCuTVA')}
                   placeholder="0,00"
-                  style={{ ...inputStyle, paddingRight: '70px' }}
+                  style={{ ...inputStyle, paddingRight: '70px', backgroundColor: isFieldCalculated('sumaCuTVA') ? 'rgba(249, 250, 251, 1)' : 'white' }}
                 />
                 <div style={{
-                  position: 'absolute',
-                  right: '14px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
+                  position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+                  display: 'flex', alignItems: 'center', gap: '6px'
                 }}>
+                  {isFieldCalculated('sumaCuTVA') && (
+                    <button onClick={resetAmountFields} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+                      <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                    </button>
+                  )}
                   <span style={{ fontSize: '12px', color: 'rgba(107, 114, 128, 1)', fontWeight: 500 }}>Lei</span>
                   <span style={{ fontSize: '13px' }}>🇷🇴</span>
                 </div>
@@ -575,19 +657,20 @@ export default function NewRecurringExpensePage() {
                 <input
                   type="text"
                   value={sumaFaraTVA}
-                  onChange={(e) => setSumaFaraTVA(e.target.value)}
+                  onChange={(e) => handleAmountChange('sumaFaraTVA', e.target.value)}
+                  readOnly={isFieldCalculated('sumaFaraTVA')}
                   placeholder="0,00"
-                  style={{ ...inputStyle, paddingRight: '70px' }}
+                  style={{ ...inputStyle, paddingRight: '70px', backgroundColor: isFieldCalculated('sumaFaraTVA') ? 'rgba(249, 250, 251, 1)' : 'white' }}
                 />
                 <div style={{
-                  position: 'absolute',
-                  right: '14px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
+                  position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+                  display: 'flex', alignItems: 'center', gap: '6px'
                 }}>
+                  {isFieldCalculated('sumaFaraTVA') && (
+                    <button onClick={resetAmountFields} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+                      <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                    </button>
+                  )}
                   <span style={{ fontSize: '12px', color: 'rgba(107, 114, 128, 1)', fontWeight: 500 }}>Lei</span>
                   <span style={{ fontSize: '13px' }}>🇷🇴</span>
                 </div>
@@ -601,87 +684,282 @@ export default function NewRecurringExpensePage() {
                 <input
                   type="text"
                   value={tva}
-                  readOnly
+                  onChange={(e) => handleAmountChange('tva', e.target.value)}
+                  readOnly={isFieldCalculated('tva')}
                   placeholder="0,00"
-                  style={{ 
-                    ...inputStyle, 
-                    paddingRight: '70px',
-                    backgroundColor: 'rgba(249, 250, 251, 1)',
-                    color: 'rgba(107, 114, 128, 1)'
-                  }}
+                  style={{ ...inputStyle, paddingRight: '70px', backgroundColor: isFieldCalculated('tva') ? 'rgba(249, 250, 251, 1)' : 'white' }}
                 />
                 <div style={{
-                  position: 'absolute',
-                  right: '14px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
+                  position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+                  display: 'flex', alignItems: 'center', gap: '6px'
                 }}>
+                  {isFieldCalculated('tva') && (
+                    <button onClick={resetAmountFields} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+                      <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                    </button>
+                  )}
                   <span style={{ fontSize: '12px', color: 'rgba(107, 114, 128, 1)', fontWeight: 500 }}>Lei</span>
                   <span style={{ fontSize: '13px' }}>🇷🇴</span>
                 </div>
               </div>
             </div>
+
+            {/* Cota TVA */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <label style={{ ...labelStyle, color: vatError ? 'rgba(239, 68, 68, 1)' : labelStyle.color }}>Cota TVA (%)</label>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <input
+                  type="text"
+                  value={cotaTVA}
+                  onChange={(e) => handleAmountChange('cotaTVA', e.target.value)}
+                  readOnly={isFieldCalculated('cotaTVA')}
+                  placeholder="ex: 21"
+                  style={{ 
+                    ...inputStyle, 
+                    paddingRight: '50px', 
+                    backgroundColor: isFieldCalculated('cotaTVA') ? 'rgba(249, 250, 251, 1)' : 'white',
+                    borderColor: vatError ? 'rgba(252, 165, 165, 1)' : inputStyle.border ? undefined : 'rgba(209, 213, 220, 0.6)'
+                  }}
+                />
+                <div style={{
+                  position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+                  display: 'flex', alignItems: 'center', gap: '6px'
+                }}>
+                  {isFieldCalculated('cotaTVA') && (
+                    <button onClick={resetAmountFields} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+                      <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                    </button>
+                  )}
+                  <span style={{ fontSize: '12px', color: 'rgba(107, 114, 128, 1)', fontWeight: 500 }}>%</span>
+                </div>
+              </div>
+              {vatError && (
+                <span style={{ color: 'rgba(239, 68, 68, 1)', fontSize: '11px', whiteSpace: 'nowrap' }}>Doar 11% sau 21%</span>
+              )}
+            </div>
           </div>
 
-          {/* Right Column - Monthly Payments */}
+          {/* Right Column - ACTIV DIN month picker */}
           <div style={{ 
-            width: '240px', 
+            width: '300px', 
             borderLeft: '1px solid rgba(229, 231, 235, 0.5)',
             paddingLeft: '28px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '8px'
+            gap: '12px'
           }}>
-            {monthlyPayments.map((mp, index) => (
-              <div 
-                key={`${mp.month}-${mp.year}`}
-                onClick={() => toggleMonthPayment(index)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '10px 0',
-                  cursor: 'pointer',
-                  borderBottom: index < monthlyPayments.length - 1 ? '1px solid rgba(243, 244, 246, 1)' : 'none'
-                }}
-              >
+            {/* State A: No month selected yet — show picker */}
+            {selectedStartMonth === null || showMonthPicker ? (
+              <>
                 <span style={{ 
-                  fontSize: '14px', 
-                  color: 'rgba(55, 65, 81, 1)',
-                  fontWeight: 400
+                  fontSize: '11px', 
+                  fontWeight: 600, 
+                  color: 'rgba(107, 114, 128, 1)', 
+                  letterSpacing: '0.5px',
+                  textTransform: 'uppercase'
                 }}>
-                  {mp.month} {mp.year}
+                  ACTIV DIN
                 </span>
-                {mp.paid ? (
-                  <div style={{
-                    width: '26px',
-                    height: '26px',
-                    borderRadius: '50%',
-                    backgroundColor: 'rgba(209, 250, 229, 1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}>
-                    <Check size={14} style={{ color: 'rgba(5, 150, 105, 1)' }} />
-                  </div>
-                ) : (
-                  <div style={{
-                    width: '26px',
-                    height: '26px',
-                    borderRadius: '50%',
-                    backgroundColor: 'rgba(254, 226, 226, 1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}>
-                    <X size={14} style={{ color: 'rgba(220, 38, 38, 1)' }} />
-                  </div>
-                )}
-              </div>
-            ))}
+
+                {/* Dropdown trigger */}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => { setShowMonthPicker(!showMonthPicker); setPickerYear(selectedStartYear); }}
+                    style={{
+                      width: '100%',
+                      height: '40px',
+                      padding: '0 14px',
+                      backgroundColor: 'white',
+                      border: '1px solid rgba(209, 213, 220, 0.6)',
+                      borderRadius: '10px',
+                      fontSize: '14px',
+                      fontFamily: '"Inter", sans-serif',
+                      color: selectedStartMonth !== null ? 'rgba(16, 24, 40, 1)' : 'rgba(156, 163, 175, 1)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      outline: 'none'
+                    }}
+                  >
+                    <span>
+                      {selectedStartMonth !== null 
+                        ? `${ROMANIAN_MONTHS[selectedStartMonth]} ${selectedStartYear}` 
+                        : 'Selectează luna...'}
+                    </span>
+                    <ChevronDown size={16} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                  </button>
+
+                  {/* Month picker dropdown */}
+                  {showMonthPicker && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '46px',
+                      left: '0',
+                      width: '280px',
+                      backgroundColor: 'white',
+                      borderRadius: '12px',
+                      boxShadow: '0px 4px 20px rgba(0, 0, 0, 0.12)',
+                      border: '1px solid rgba(229, 231, 235, 0.5)',
+                      padding: '16px',
+                      zIndex: 50
+                    }}>
+                      {/* Year navigation */}
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'space-between',
+                        marginBottom: '14px'
+                      }}>
+                        <button
+                          onClick={() => setPickerYear(pickerYear - 1)}
+                          style={{ 
+                            background: 'none', border: 'none', cursor: 'pointer', padding: '4px',
+                            color: 'rgba(107, 114, 128, 1)', fontSize: '16px'
+                          }}
+                        >
+                          ‹
+                        </button>
+                        <span style={{ fontSize: '15px', fontWeight: 600, color: 'rgba(16, 24, 40, 1)' }}>
+                          {pickerYear}
+                        </span>
+                        <button
+                          onClick={() => setPickerYear(pickerYear + 1)}
+                          style={{ 
+                            background: 'none', border: 'none', cursor: 'pointer', padding: '4px',
+                            color: 'rgba(107, 114, 128, 1)', fontSize: '16px'
+                          }}
+                        >
+                          ›
+                        </button>
+                      </div>
+
+                      {/* Month grid - 4 rows x 3 cols */}
+                      <div style={{ 
+                        display: 'grid', 
+                        gridTemplateColumns: 'repeat(3, 1fr)', 
+                        gap: '6px' 
+                      }}>
+                        {ROMANIAN_MONTHS.map((monthName, monthIndex) => {
+                          const isSelected = selectedStartMonth === monthIndex && selectedStartYear === pickerYear;
+                          return (
+                            <button
+                              key={monthName}
+                              onClick={() => {
+                                setSelectedStartMonth(monthIndex);
+                                setSelectedStartYear(pickerYear);
+                                setShowMonthPicker(false);
+                              }}
+                              style={{
+                                padding: '8px 4px',
+                                borderRadius: '8px',
+                                border: isSelected ? '2px solid rgba(0, 212, 146, 1)' : '1px solid transparent',
+                                backgroundColor: isSelected ? 'rgba(0, 212, 146, 0.08)' : 'transparent',
+                                color: isSelected ? 'rgba(0, 180, 130, 1)' : 'rgba(55, 65, 81, 1)',
+                                fontSize: '13px',
+                                fontWeight: isSelected ? 600 : 400,
+                                cursor: 'pointer',
+                                fontFamily: '"Inter", sans-serif',
+                                transition: 'all 0.15s'
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!isSelected) e.currentTarget.style.backgroundColor = 'rgba(243, 244, 246, 1)';
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+                              }}
+                            >
+                              {monthName}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                {/* State B: Month selected — show month list with pencil edit button */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => { setShowMonthPicker(true); setPickerYear(selectedStartYear); }}
+                    title="Modifică luna de start"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      color: 'rgba(156, 163, 175, 1)',
+                      transition: 'color 0.15s'
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(107, 114, 128, 1)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(156, 163, 175, 1)'; }}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </div>
+
+                {/* Month list — from current month backwards to selected start, max 12 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0px' }}>
+                  {(() => {
+                    const now = new Date();
+                    const currentYear = now.getFullYear();
+                    const currentMonthIdx = now.getMonth();
+                    const startYear = selectedStartYear;
+                    const startMonthIdx = selectedStartMonth!;
+                    
+                    // Build list from current month backwards to start month
+                    const months: { month: number; year: number }[] = [];
+                    let y = currentYear;
+                    let m = currentMonthIdx;
+                    const startDate = new Date(startYear, startMonthIdx, 1);
+                    
+                    while (months.length < 12) {
+                      const thisDate = new Date(y, m, 1);
+                      if (thisDate < startDate) break;
+                      months.push({ month: m, year: y });
+                      m--;
+                      if (m < 0) { m = 11; y--; }
+                    }
+                    
+                    // Reverse so oldest is at bottom, newest at top
+                    // Actually per the Figma: newest at top
+                    return months.map((item) => (
+                      <div
+                        key={`${item.year}-${item.month}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '11px 0'
+                        }}
+                      >
+                        <span style={{ 
+                          fontSize: '14px', 
+                          color: 'rgba(55, 65, 81, 1)',
+                          fontWeight: 400
+                        }}>
+                          {ROMANIAN_MONTHS[item.month]} {item.year}
+                        </span>
+                        {/* Red X circle — template placeholder, no real data yet */}
+                        <div style={{
+                          width: '26px',
+                          height: '26px',
+                          borderRadius: '50%',
+                          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}>
+                          <X size={13} strokeWidth={2.5} style={{ color: 'rgba(239, 68, 68, 0.8)' }} />
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </>
+            )}
           </div>
         </div>
 

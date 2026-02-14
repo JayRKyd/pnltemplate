@@ -542,7 +542,7 @@ async function calculatePnlManually(
       .select("expense_date, amount, amount_without_vat, amount_with_vat, vat_deductible, status")
       .eq("team_id", teamId)
       .is("deleted_at", null)
-      .not("status", "in", '("draft","rejected")'),
+      .not("status", "in", '("draft","rejected","skipped")'),
 
     // Get revenues
     supabase
@@ -647,7 +647,7 @@ async function getExpensesByCategoryManual(
       `)
       .eq("team_id", teamId)
       .is("deleted_at", null)
-      .not("status", "in", '("draft","rejected")'),
+      .not("status", "in", '("draft","rejected","skipped")'),
 
     supabase
       .from("team_expense_categories")

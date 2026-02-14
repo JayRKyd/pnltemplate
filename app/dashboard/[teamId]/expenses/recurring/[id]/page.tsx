@@ -16,7 +16,9 @@ import {
   getTemplateExpenses,
   TemplateExpense,
   generateRecurringForms,
-  getTemplateVersionHistory
+  getTemplateVersionHistory,
+  skipRecurringMonth,
+  unskipRecurringMonth
 } from '@/app/actions/recurring-expenses';
 import { useUser } from '@stackframe/stack';
 import { getUserPermissions } from '@/app/actions/permissions';
@@ -55,6 +57,9 @@ export default function RecurringExpenseDetailPage() {
   const [sumaCuTVA, setSumaCuTVA] = useState('');
   const [sumaFaraTVA, setSumaFaraTVA] = useState('');
   const [tva, setTva] = useState('');
+  const [cotaTVA, setCotaTVA] = useState('');
+  const [manualFields, setManualFields] = useState<string[]>([]);
+  const [vatError, setVatError] = useState('');
 
   const [categories, setCategories] = useState<CategoryWithChildren[]>([]);
   const [showContDropdown, setShowContDropdown] = useState(false);
@@ -144,6 +149,9 @@ export default function RecurringExpenseDetailPage() {
             const vatAmount = expense.amount_with_vat - expense.amount_without_vat;
             setTva(formatAmount(vatAmount));
           }
+          if (expense.vat_rate) {
+            setCotaTVA(expense.vat_rate.toFixed(2));
+          }
         }
       } catch (error) {
         console.error('Failed to load recurring expense:', error);
@@ -178,28 +186,172 @@ export default function RecurringExpenseDetailPage() {
     return category?.children || [];
   }, [categories, cont]);
 
-  // Calculate TVA when amounts change
-  useEffect(() => {
-    const cuTVA = parseAmount(sumaCuTVA);
-    const faraTVA = parseAmount(sumaFaraTVA);
-    
-    if (cuTVA > 0 && faraTVA > 0) {
-      const tvaAmount = cuTVA - faraTVA;
-      setTva(formatAmount(tvaAmount));
+  // VAT field helpers
+  type AmountField = 'sumaCuTVA' | 'sumaFaraTVA' | 'tva' | 'cotaTVA';
+  const ALL_FIELDS: AmountField[] = ['sumaCuTVA', 'sumaFaraTVA', 'tva', 'cotaTVA'];
+
+  const getFieldValue = (field: AmountField): string => {
+    if (field === 'sumaCuTVA') return sumaCuTVA;
+    if (field === 'sumaFaraTVA') return sumaFaraTVA;
+    if (field === 'tva') return tva;
+    return cotaTVA;
+  };
+
+  const setFieldValue = (field: AmountField, value: string) => {
+    if (field === 'sumaCuTVA') setSumaCuTVA(value);
+    else if (field === 'sumaFaraTVA') setSumaFaraTVA(value);
+    else if (field === 'tva') setTva(value);
+    else setCotaTVA(value);
+  };
+
+  const isFieldCalculated = (field: AmountField): boolean => {
+    return manualFields.length >= 2 && !manualFields.includes(field);
+  };
+
+  const isVatRateValid = (rate: string): boolean => {
+    if (!rate || rate.trim() === '') return true;
+    const num = parseFloat(rate.replace('%', '').replace(',', '.').trim());
+    if (isNaN(num)) return true;
+    return Math.abs(num - 11) < 0.01 || Math.abs(num - 21) < 0.01;
+  };
+
+  const calculateVATFields = (
+    f1: AmountField, v1: number, f2: AmountField, v2: number
+  ): Record<AmountField, number> => {
+    const known: Partial<Record<AmountField, number>> = {};
+    known[f1] = v1; known[f2] = v2;
+    const S = known.sumaCuTVA, F = known.sumaFaraTVA, T = known.tva, C = known.cotaTVA;
+    let sR = 0, fR = 0, tR = 0, cR = 0;
+
+    if (S !== undefined && F !== undefined) {
+      sR = S; fR = F; tR = S - F; cR = F > 0 ? (tR / F) * 100 : 0;
+    } else if (S !== undefined && T !== undefined) {
+      sR = S; tR = T; fR = S - T; cR = fR > 0 ? (tR / fR) * 100 : 0;
+    } else if (S !== undefined && C !== undefined) {
+      sR = S; cR = C; fR = C > 0 ? S / (1 + C / 100) : S; tR = sR - fR;
+    } else if (F !== undefined && T !== undefined) {
+      fR = F; tR = T; sR = F + T; cR = F > 0 ? (T / F) * 100 : 0;
+    } else if (F !== undefined && C !== undefined) {
+      fR = F; cR = C; tR = F * (C / 100); sR = F + tR;
+    } else if (T !== undefined && C !== undefined) {
+      tR = T; cR = C; fR = C > 0 ? T / (C / 100) : 0; sR = fR + tR;
     }
-  }, [sumaCuTVA, sumaFaraTVA]);
+    return { sumaCuTVA: sR, sumaFaraTVA: fR, tva: tR, cotaTVA: cR };
+  };
+
+  const handleAmountChange = (field: AmountField, value: string) => {
+    if (isFieldCalculated(field) && value.trim() !== '') {
+      setSumaCuTVA(''); setSumaFaraTVA(''); setTva(''); setCotaTVA('');
+      setManualFields([]);
+      setVatError('');
+    }
+
+    setFieldValue(field, value);
+
+    setManualFields(prev => {
+      let updated = [...prev];
+      if (value.trim() === '' || value === '0' || value === '0,00') {
+        updated = updated.filter(f => f !== field);
+      } else if (!updated.includes(field) && updated.length < 2) {
+        updated = [...updated, field];
+      }
+      return updated;
+    });
+  };
+
+  // Run calculation whenever manual fields or their values change
+  useEffect(() => {
+    const filled = manualFields.filter(f => {
+      const v = getFieldValue(f as AmountField);
+      return v && v.trim() !== '' && v !== '0' && v !== '0,00';
+    });
+
+    if (filled.length === 2) {
+      const [f1, f2] = filled as AmountField[];
+      const v1 = f1 === 'cotaTVA' ? parseFloat(getFieldValue(f1).replace('%','').replace(',','.')) || 0 : parseAmount(getFieldValue(f1));
+      const v2 = f2 === 'cotaTVA' ? parseFloat(getFieldValue(f2).replace('%','').replace(',','.')) || 0 : parseAmount(getFieldValue(f2));
+
+      if (v1 > 0 || v2 > 0) {
+        const result = calculateVATFields(f1, v1, f2, v2);
+        ALL_FIELDS.forEach(f => {
+          if (!filled.includes(f)) {
+            if (f === 'cotaTVA') {
+              setCotaTVA(result.cotaTVA.toFixed(2));
+            } else {
+              setFieldValue(f, formatAmount(result[f]));
+            }
+          }
+        });
+        const rateVal = filled.includes('cotaTVA') ? getFieldValue('cotaTVA') : result.cotaTVA.toFixed(2);
+        if (!isVatRateValid(rateVal)) {
+          setVatError('Cota TVA trebuie sa fie 11% sau 21%');
+        } else {
+          setVatError('');
+        }
+      }
+    } else {
+      ALL_FIELDS.forEach(f => {
+        if (!manualFields.includes(f)) {
+          setFieldValue(f as AmountField, '');
+        }
+      });
+      setVatError('');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualFields, sumaCuTVA, sumaFaraTVA, tva, cotaTVA]);
+
+  const resetAmountFields = () => {
+    setSumaCuTVA(''); setSumaFaraTVA(''); setTva(''); setCotaTVA('');
+    setManualFields([]);
+    setVatError('');
+  };
 
   const handleClose = () => {
     router.push(`/dashboard/${params.teamId}/expenses?tab=Recurente`);
   };
 
+  // §10 Phase 2: Determine the earliest month a new version can start from
+  // Rule: cannot pick past months. If current month's RE-Form is finalized (status !== 'recurent'), 
+  // current month is also disabled — earliest becomes next month.
+  const getEarliestVersionMonth = useCallback((): { month: number; year: number } => {
+    const now = new Date();
+    let month = now.getMonth(); // 0-indexed
+    let year = now.getFullYear();
+
+    // Check if current month's RE-Form has been finalized
+    const currentMonthForm = templateExpenses.find(
+      te => te.month === month + 1 && te.year === year // te.month is 1-indexed
+    );
+    if (currentMonthForm && currentMonthForm.status !== 'recurent') {
+      // Current month is finalized — push to next month
+      month++;
+      if (month > 11) { month = 0; year++; }
+    }
+
+    return { month, year };
+  }, [templateExpenses]);
+
+  // Check if a specific month/year is disabled in the version picker
+  const isMonthDisabledForVersion = useCallback((monthIdx: number, year: number): boolean => {
+    const { month: minMonth, year: minYear } = getEarliestVersionMonth();
+    const minDate = new Date(minYear, minMonth, 1);
+    const thisDate = new Date(year, monthIdx, 1);
+    return thisDate < minDate;
+  }, [getEarliestVersionMonth]);
 
   const handleSave = async () => {
     if (!recurringExpense) return;
     
+    // Block save on invalid VAT rate
+    if (vatError) {
+      alert(vatError);
+      return;
+    }
+    
     const newAmountWithVat = parseAmount(sumaCuTVA) || undefined;
     const newAmountWithoutVat = parseAmount(sumaFaraTVA) || undefined;
     const newAmount = parseAmount(sumaFaraTVA) || parseAmount(sumaCuTVA);
+    const newVatRate = cotaTVA ? parseFloat(cotaTVA.replace('%', '').replace(',', '.')) : undefined;
 
     // Detect if amounts changed → need versioned update with confirmation
     const amountsChanged = 
@@ -213,6 +365,7 @@ export default function RecurringExpenseDetailPage() {
       categoryId: cont || undefined,
       subcategoryId: subcont || undefined,
       vatDeductible: tvaDeductibil === 'Da',
+      vatRate: newVatRate,
       amountWithVat: newAmountWithVat,
       amountWithoutVat: newAmountWithoutVat,
       amount: newAmount,
@@ -227,6 +380,10 @@ export default function RecurringExpenseDetailPage() {
 
     if (amountsChanged) {
       // §10: Show double confirmation + month picker
+      // Auto-set to earliest valid month
+      const { month: minMonth, year: minYear } = getEarliestVersionMonth();
+      setVersionStartMonth(minMonth);
+      setVersionStartYear(minYear);
       setPendingUpdatePayload(updatePayload);
       setShowVersionConfirm(true);
       return;
@@ -327,6 +484,25 @@ export default function RecurringExpenseDetailPage() {
       setShowDeleteConfirm(false);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // Skip/unskip a month for this template
+  const handleSkipMonth = async (monthIndex: number, year: number, currentStatus: string) => {
+    if (!recurringExpense) return;
+    const month1 = monthIndex + 1; // convert 0-indexed to 1-indexed
+    try {
+      if (currentStatus === 'skipped') {
+        await unskipRecurringMonth(recurringExpense.id, params.teamId, year, month1);
+      } else {
+        await skipRecurringMonth(recurringExpense.id, params.teamId, year, month1);
+      }
+      // Refresh template expenses
+      const currentYear = new Date().getFullYear();
+      const updated = await getTemplateExpenses(params.id, params.teamId, currentYear);
+      setTemplateExpenses(updated);
+    } catch (err) {
+      console.error('Failed to skip/unskip month:', err);
     }
   };
 
@@ -717,19 +893,20 @@ export default function RecurringExpenseDetailPage() {
                 <input
                   type="text"
                   value={sumaCuTVA}
-                  onChange={(e) => setSumaCuTVA(e.target.value)}
+                  onChange={(e) => handleAmountChange('sumaCuTVA', e.target.value)}
+                  readOnly={isFieldCalculated('sumaCuTVA')}
                   placeholder="0,00"
-                  style={{ ...inputStyle, paddingRight: '70px' }}
+                  style={{ ...inputStyle, paddingRight: '70px', backgroundColor: isFieldCalculated('sumaCuTVA') ? 'rgba(249, 250, 251, 1)' : 'white' }}
                 />
                 <div style={{
-                  position: 'absolute',
-                  right: '14px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
+                  position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+                  display: 'flex', alignItems: 'center', gap: '6px'
                 }}>
+                  {isFieldCalculated('sumaCuTVA') && (
+                    <button onClick={resetAmountFields} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+                      <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                    </button>
+                  )}
                   <span style={{ fontSize: '12px', color: 'rgba(107, 114, 128, 1)', fontWeight: 500 }}>Lei</span>
                   <span style={{ fontSize: '13px' }}>🇷🇴</span>
                 </div>
@@ -743,19 +920,20 @@ export default function RecurringExpenseDetailPage() {
                 <input
                   type="text"
                   value={sumaFaraTVA}
-                  onChange={(e) => setSumaFaraTVA(e.target.value)}
+                  onChange={(e) => handleAmountChange('sumaFaraTVA', e.target.value)}
+                  readOnly={isFieldCalculated('sumaFaraTVA')}
                   placeholder="0,00"
-                  style={{ ...inputStyle, paddingRight: '70px' }}
+                  style={{ ...inputStyle, paddingRight: '70px', backgroundColor: isFieldCalculated('sumaFaraTVA') ? 'rgba(249, 250, 251, 1)' : 'white' }}
                 />
                 <div style={{
-                  position: 'absolute',
-                  right: '14px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
+                  position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+                  display: 'flex', alignItems: 'center', gap: '6px'
                 }}>
+                  {isFieldCalculated('sumaFaraTVA') && (
+                    <button onClick={resetAmountFields} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+                      <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                    </button>
+                  )}
                   <span style={{ fontSize: '12px', color: 'rgba(107, 114, 128, 1)', fontWeight: 500 }}>Lei</span>
                   <span style={{ fontSize: '13px' }}>🇷🇴</span>
                 </div>
@@ -769,28 +947,58 @@ export default function RecurringExpenseDetailPage() {
                 <input
                   type="text"
                   value={tva}
-                  readOnly
+                  onChange={(e) => handleAmountChange('tva', e.target.value)}
+                  readOnly={isFieldCalculated('tva')}
                   placeholder="0,00"
-                  style={{ 
-                    ...inputStyle, 
-                    paddingRight: '70px',
-                    backgroundColor: 'rgba(249, 250, 251, 1)',
-                    color: 'rgba(107, 114, 128, 1)'
-                  }}
+                  style={{ ...inputStyle, paddingRight: '70px', backgroundColor: isFieldCalculated('tva') ? 'rgba(249, 250, 251, 1)' : 'white' }}
                 />
                 <div style={{
-                  position: 'absolute',
-                  right: '14px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
+                  position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+                  display: 'flex', alignItems: 'center', gap: '6px'
                 }}>
+                  {isFieldCalculated('tva') && (
+                    <button onClick={resetAmountFields} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+                      <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                    </button>
+                  )}
                   <span style={{ fontSize: '12px', color: 'rgba(107, 114, 128, 1)', fontWeight: 500 }}>Lei</span>
                   <span style={{ fontSize: '13px' }}>🇷🇴</span>
                 </div>
               </div>
+            </div>
+
+            {/* Cota TVA */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <label style={{ ...labelStyle, color: vatError ? 'rgba(239, 68, 68, 1)' : labelStyle.color }}>Cota TVA (%)</label>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <input
+                  type="text"
+                  value={cotaTVA}
+                  onChange={(e) => handleAmountChange('cotaTVA', e.target.value)}
+                  readOnly={isFieldCalculated('cotaTVA')}
+                  placeholder="ex: 21"
+                  style={{ 
+                    ...inputStyle, 
+                    paddingRight: '50px', 
+                    backgroundColor: isFieldCalculated('cotaTVA') ? 'rgba(249, 250, 251, 1)' : 'white',
+                    borderColor: vatError ? 'rgba(252, 165, 165, 1)' : undefined
+                  }}
+                />
+                <div style={{
+                  position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+                  display: 'flex', alignItems: 'center', gap: '6px'
+                }}>
+                  {isFieldCalculated('cotaTVA') && (
+                    <button onClick={resetAmountFields} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+                      <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+                    </button>
+                  )}
+                  <span style={{ fontSize: '12px', color: 'rgba(107, 114, 128, 1)', fontWeight: 500 }}>%</span>
+                </div>
+              </div>
+              {vatError && (
+                <span style={{ color: 'rgba(239, 68, 68, 1)', fontSize: '11px', whiteSpace: 'nowrap' }}>Doar 11% sau 21%</span>
+              )}
             </div>
           </div>
 
@@ -804,34 +1012,59 @@ export default function RecurringExpenseDetailPage() {
             gap: '8px'
           }}>
             {(() => {
-              const currentYear = new Date().getFullYear();
               const romanianMonths = [
                 'Ianuarie', 'Februarie', 'Martie', 'Aprilie', 'Mai', 'Iunie',
                 'Iulie', 'August', 'Septembrie', 'Octombrie', 'Noiembrie', 'Decembrie'
               ];
 
-              return romanianMonths.map((monthName, monthIndex) => {
-                const reForm = templateExpenses.find((e: TemplateExpense) => e.month === monthIndex + 1);
+              // Show current month and past 11 months (12 total, newest first)
+              const now = new Date();
+              const currentMonth = now.getMonth(); // 0-indexed
+              const currentYear = now.getFullYear();
+
+              const months: { month: number; year: number }[] = [];
+              let m = currentMonth;
+              let y = currentYear;
+              for (let i = 0; i < 12; i++) {
+                months.push({ month: m, year: y });
+                m--;
+                if (m < 0) { m = 11; y--; }
+              }
+
+              return months.map((entry, idx) => {
+                const monthName = romanianMonths[entry.month];
+                const reForm = templateExpenses.find((e: TemplateExpense) => e.month === entry.month + 1 && e.year === entry.year);
                 const isDone = reForm?.status === 'draft' || reForm?.status === 'final';
                 const isRecurent = reForm?.status === 'recurent';
+                const isSkipped = reForm?.status === 'skipped';
                 const hasExpense = !!reForm;
 
                 return (
                   <div
-                    key={`${monthName}-${currentYear}`}
-                    onClick={() => reForm && handleOpenExpenseForm(reForm.id)}
+                    key={`${entry.year}-${entry.month}`}
+                    onClick={() => {
+                      if (isSkipped) return;
+                      if (reForm) handleOpenExpenseForm(reForm.id);
+                    }}
+                    onContextMenu={(e) => {
+                      if (reForm && (isRecurent || isSkipped)) {
+                        e.preventDefault();
+                        handleSkipMonth(entry.month, entry.year, reForm.status);
+                      }
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       padding: '10px 0',
-                      cursor: hasExpense ? 'pointer' : 'default',
-                      borderBottom: monthIndex < 11 ? '1px solid rgba(243, 244, 246, 1)' : 'none',
+                      cursor: hasExpense && !isSkipped ? 'pointer' : 'default',
+                      borderBottom: idx < months.length - 1 ? '1px solid rgba(243, 244, 246, 1)' : 'none',
                       transition: 'background-color 0.2s',
                       backgroundColor: 'transparent',
+                      opacity: isSkipped ? 0.5 : 1,
                     }}
                     onMouseEnter={(e) => {
-                      if (hasExpense) e.currentTarget.style.backgroundColor = 'rgba(240, 253, 250, 0.5)';
+                      if (hasExpense && !isSkipped) e.currentTarget.style.backgroundColor = 'rgba(240, 253, 250, 0.5)';
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.backgroundColor = 'transparent';
@@ -839,10 +1072,11 @@ export default function RecurringExpenseDetailPage() {
                   >
                     <span style={{
                       fontSize: '14px',
-                      color: 'rgba(55, 65, 81, 1)',
-                      fontWeight: 400
+                      color: isSkipped ? 'rgba(156, 163, 175, 1)' : 'rgba(55, 65, 81, 1)',
+                      fontWeight: 400,
+                      textDecoration: isSkipped ? 'line-through' : 'none'
                     }}>
-                      {monthName} {currentYear}
+                      {monthName} {entry.year}
                     </span>
 
                     {isDone && (
@@ -870,6 +1104,20 @@ export default function RecurringExpenseDetailPage() {
                         justifyContent: 'center'
                       }}>
                         <X size={14} style={{ color: 'rgba(220, 38, 38, 1)' }} />
+                      </div>
+                    )}
+
+                    {isSkipped && (
+                      <div style={{
+                        width: '26px',
+                        height: '26px',
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(243, 244, 246, 1)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <span style={{ color: 'rgba(156, 163, 175, 1)', fontSize: '16px', fontWeight: 600, lineHeight: 1 }}>–</span>
                       </div>
                     )}
 
@@ -1045,7 +1293,7 @@ export default function RecurringExpenseDetailPage() {
       {/* §10: Version Confirmation - Step 1 */}
       {showVersionConfirm && !showVersionStep2 && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} onClick={() => { setShowVersionConfirm(false); setPendingUpdatePayload(null); }} />
+          <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(4px)' }} onClick={() => { setShowVersionConfirm(false); setPendingUpdatePayload(null); if (recurringExpense) { setSumaCuTVA(recurringExpense.amount_with_vat ? formatAmount(recurringExpense.amount_with_vat) : ''); setSumaFaraTVA(recurringExpense.amount_without_vat ? formatAmount(recurringExpense.amount_without_vat) : ''); setTva(recurringExpense.amount_with_vat && recurringExpense.amount_without_vat ? formatAmount(recurringExpense.amount_with_vat - recurringExpense.amount_without_vat) : ''); setNumeFurnizor(recurringExpense.supplier || ''); setDescriere(recurringExpense.description || ''); setTags(recurringExpense.tags?.join(', ') || ''); setCont(recurringExpense.category_id || ''); setSubcont(recurringExpense.subcategory_id || ''); setTvaDeductibil(recurringExpense.vat_deductible ? 'Da' : 'Nu'); } }} />
           <div style={{ position: 'relative', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0px 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '520px', margin: '16px', padding: '32px' }}>
             <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'rgba(16, 24, 40, 1)', marginBottom: '16px' }}>Modificare template</h2>
             <p style={{ color: 'rgba(107, 114, 128, 1)', marginBottom: '8px' }}>Ai modificat sumele template-ului. Aceasta va crea o versiune nouă a template-ului.</p>
@@ -1053,7 +1301,7 @@ export default function RecurringExpenseDetailPage() {
               Template-ul curent va deveni inactiv. Cheltuielile generate anterior NU vor fi modificate.
             </p>
             <div style={{ display: 'flex', gap: '12px' }}>
-              <button onClick={() => { setShowVersionConfirm(false); setPendingUpdatePayload(null); }} style={{ flex: 1, padding: '12px 24px', border: '1px solid rgba(229, 231, 235, 1)', borderRadius: '9999px', color: 'rgba(55, 65, 81, 1)', fontWeight: 500, backgroundColor: 'white', cursor: 'pointer' }}>Anulează</button>
+              <button onClick={() => { setShowVersionConfirm(false); setPendingUpdatePayload(null); if (recurringExpense) { setSumaCuTVA(recurringExpense.amount_with_vat ? formatAmount(recurringExpense.amount_with_vat) : ''); setSumaFaraTVA(recurringExpense.amount_without_vat ? formatAmount(recurringExpense.amount_without_vat) : ''); setTva(recurringExpense.amount_with_vat && recurringExpense.amount_without_vat ? formatAmount(recurringExpense.amount_with_vat - recurringExpense.amount_without_vat) : ''); setNumeFurnizor(recurringExpense.supplier || ''); setDescriere(recurringExpense.description || ''); setTags(recurringExpense.tags?.join(', ') || ''); setCont(recurringExpense.category_id || ''); setSubcont(recurringExpense.subcategory_id || ''); setTvaDeductibil(recurringExpense.vat_deductible ? 'Da' : 'Nu'); } }} style={{ flex: 1, padding: '12px 24px', border: '1px solid rgba(229, 231, 235, 1)', borderRadius: '9999px', color: 'rgba(55, 65, 81, 1)', fontWeight: 500, backgroundColor: 'white', cursor: 'pointer' }}>Anulează</button>
               <button onClick={() => setShowVersionStep2(true)} style={{ flex: 1, padding: '12px 24px', background: 'linear-gradient(180deg, rgba(0, 212, 146, 1) 0%, rgba(81, 162, 255, 1) 100%)', color: 'white', borderRadius: '9999px', fontWeight: 500, border: 'none', cursor: 'pointer' }}>Da, continuă</button>
             </div>
           </div>
@@ -1079,23 +1327,25 @@ export default function RecurringExpenseDetailPage() {
               </button>
             </div>
 
-            {/* Month grid */}
+            {/* Month grid — months before earliest valid month are disabled */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '24px' }}>
               {['Ian', 'Feb', 'Mar', 'Apr', 'Mai', 'Iun', 'Iul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, idx) => {
                 const isSelected = versionStartMonth === idx;
+                const isDisabled = isMonthDisabledForVersion(idx, versionStartYear);
                 return (
                   <button
                     key={month}
-                    onClick={() => setVersionStartMonth(idx)}
+                    onClick={() => { if (!isDisabled) setVersionStartMonth(idx); }}
+                    disabled={isDisabled}
                     style={{
                       padding: '12px 8px',
-                      backgroundColor: isSelected ? 'rgba(240, 253, 250, 1)' : 'transparent',
-                      border: isSelected ? '2px solid rgba(13, 148, 136, 0.6)' : '1px solid rgba(229, 231, 235, 0.6)',
+                      backgroundColor: isDisabled ? 'rgba(243, 244, 246, 0.5)' : isSelected ? 'rgba(240, 253, 250, 1)' : 'transparent',
+                      border: isSelected && !isDisabled ? '2px solid rgba(13, 148, 136, 0.6)' : '1px solid rgba(229, 231, 235, 0.6)',
                       borderRadius: '10px',
-                      color: isSelected ? 'rgba(13, 148, 136, 1)' : 'rgba(55, 65, 81, 1)',
+                      color: isDisabled ? 'rgba(209, 213, 220, 1)' : isSelected ? 'rgba(13, 148, 136, 1)' : 'rgba(55, 65, 81, 1)',
                       fontSize: '14px',
-                      fontWeight: isSelected ? 600 : 400,
-                      cursor: 'pointer',
+                      fontWeight: isSelected && !isDisabled ? 600 : 400,
+                      cursor: isDisabled ? 'not-allowed' : 'pointer',
                       transition: 'all 0.15s'
                     }}
                   >
