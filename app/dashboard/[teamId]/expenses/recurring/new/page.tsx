@@ -600,7 +600,14 @@ export default function NewRecurringExpensePage() {
                   {tvaDeductibil === 'Da' && <Check size={14} style={{ color: 'rgba(16, 198, 182, 1)' }} />}
                 </button>
                 <button
-                  onClick={() => setTvaDeductibil('Nu')}
+                  onClick={() => {
+                    setTvaDeductibil('Nu');
+                    // Clear VAT detail fields when switching to non-deductible
+                    setSumaFaraTVA('');
+                    setTva('');
+                    setCotaTVA('');
+                    setManualFields([]);
+                  }}
                   style={{
                     flex: 1,
                     height: '36px',
@@ -650,7 +657,8 @@ export default function NewRecurringExpensePage() {
               </div>
             </div>
 
-            {/* Suma fara TVA */}
+            {/* Suma fara TVA - only show when deductible */}
+            {tvaDeductibil === 'Da' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <label style={labelStyle}>Suma fara TVA</label>
               <div style={{ flex: 1, position: 'relative' }}>
@@ -676,8 +684,10 @@ export default function NewRecurringExpensePage() {
                 </div>
               </div>
             </div>
+            )}
 
-            {/* TVA */}
+            {/* TVA - only show when deductible */}
+            {tvaDeductibil === 'Da' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <label style={labelStyle}>TVA</label>
               <div style={{ flex: 1, position: 'relative' }}>
@@ -703,8 +713,10 @@ export default function NewRecurringExpensePage() {
                 </div>
               </div>
             </div>
+            )}
 
-            {/* Cota TVA */}
+            {/* Cota TVA - only show when deductible */}
+            {tvaDeductibil === 'Da' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <label style={{ ...labelStyle, color: vatError ? 'rgba(239, 68, 68, 1)' : labelStyle.color }}>Cota TVA (%)</label>
               <div style={{ flex: 1, position: 'relative' }}>
@@ -737,6 +749,7 @@ export default function NewRecurringExpensePage() {
                 <span style={{ color: 'rgba(239, 68, 68, 1)', fontSize: '11px', whiteSpace: 'nowrap' }}>Doar 11% sau 21%</span>
               )}
             </div>
+            )}
           </div>
 
           {/* Right Column - ACTIV DIN month picker */}

@@ -1481,7 +1481,8 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                     </div>
                   </div>
 
-                  {/* Suma fara TVA */}
+                  {/* Suma fara TVA - only show when deductible */}
+                  {line.tvaDeductibil === 'Da' && (
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <label style={{ width: '128px', color: hasFieldError(index, 'sumaFaraTVA') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Suma fara TVA</label>
                     <div style={{ position: 'relative', width: '296px' }}>
@@ -1509,8 +1510,10 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                       </div>
                     </div>
                   </div>
+                  )}
 
-                  {/* TVA */}
+                  {/* TVA - only show when deductible */}
+                  {line.tvaDeductibil === 'Da' && (
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <label style={{ width: '128px', color: hasFieldError(index, 'tva') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>TVA</label>
                     <div style={{ position: 'relative', width: '296px' }}>
@@ -1538,8 +1541,10 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                       </div>
                     </div>
                   </div>
+                  )}
 
-                  {/* Cota TVA */}
+                  {/* Cota TVA - only show when deductible */}
+                  {line.tvaDeductibil === 'Da' && (
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <label style={{ width: '128px', color: hasFieldError(index, 'cotaTVA') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Cota TVA (%)</label>
                     <div style={{ position: 'relative', width: '296px' }}>
@@ -1569,6 +1574,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                       <span style={{ color: errorTextStyle, fontSize: '11px', whiteSpace: 'nowrap' }}>Doar 11% sau 21%</span>
                     )}
                   </div>
+                  )}
 
                   {/* Luna P&L */}
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -1735,7 +1741,19 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                     <div style={{ position: 'relative', width: '296px' }}>
                       <select 
                         value={line.tvaDeductibil} 
-                        onChange={(e) => updateLine(index, "tvaDeductibil", e.target.value)}
+                        onChange={(e) => {
+                          const newValue = e.target.value;
+                          updateLine(index, "tvaDeductibil", newValue);
+                          // Clear VAT detail fields when switching to non-deductible
+                          if (newValue === 'Nu') {
+                            updateLine(index, "sumaFaraTVA", "");
+                            updateLine(index, "tva", "");
+                            updateLine(index, "cotaTVA", "");
+                            const newLines = [...lines];
+                            newLines[index].manualFields = [];
+                            setLines(newLines);
+                          }
+                        }}
                         style={{ width: '100%', height: '36px', padding: '0 32px 0 16px', backgroundColor: 'white', border: '1px solid rgba(209, 213, 220, 0.5)', borderRadius: '9999px', fontSize: '14px', appearance: 'none', cursor: 'pointer', outline: 'none', color: 'rgba(16, 24, 40, 1)' }}
                       >
                         {TVA_DEDUCTIBIL_OPTIONS.map(opt => (
