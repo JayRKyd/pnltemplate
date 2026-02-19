@@ -1,61 +1,102 @@
 "use server";
 
 import { supabase } from "@/lib/supabase";
+import { fetchForexRates } from "@/lib/forex-client";
 
 export interface ExchangeRate {
   id: string;
   rate_date: string;
   eur_to_ron: number;
   usd_to_ron: number | null;
+  gbp_to_ron: number | null;
   source: string;
   created_at: string;
   updated_at: string;
 }
 
-// Get exchange rate for a specific date
+// Default fallback rates (approximate Jan 2026)
+const DEFAULT_RATES: Record<"EUR" | "USD" | "GBP", number> = {
+  EUR: 4.97,
+  USD: 4.50,
+  GBP: 5.83,
+};
+
+// ── Core rate lookup ─────────────────────────────────────────────────────────
+
+/**
+ * Get exchange rate for a specific date and currency.
+ *
+ * Resolution order:
+ *  1. Supabase `exchange_rates` table (cached rates)
+ *  2. Bono forex API (live fetch → also caches to Supabase)
+ *  3. Hardcoded defaults
+ */
 export async function getExchangeRate(
   date: string | Date,
-  currency: "EUR" | "USD" = "EUR"
+  currency: "EUR" | "USD" | "GBP" = "EUR"
 ): Promise<number> {
-  const dateStr = typeof date === "string" ? date : date.toISOString().split("T")[0];
+  const dateStr =
+    typeof date === "string" ? date : date.toISOString().split("T")[0];
 
+  // 1. Try Supabase cache first
   const { data, error } = await supabase.rpc("get_exchange_rate", {
     p_date: dateStr,
     p_currency: currency,
   });
 
-  if (error) {
-    console.error("[getExchangeRate] Error:", error);
-    // Return default rates as fallback
-    return currency === "EUR" ? 4.97 : 4.50;
+  if (!error && data) {
+    return data;
   }
 
-  return data || (currency === "EUR" ? 4.97 : 4.50);
+  // 2. Try Supabase table directly (covers cases where the RPC doesn't exist yet)
+  const cached = await getCachedRate(dateStr, currency);
+  if (cached !== null) {
+    return cached;
+  }
+
+  // 3. Live fetch from Bono API and cache
+  const live = await fetchAndCacheRates(dateStr);
+  if (live) {
+    const key = `${currency.toLowerCase()}_to_ron` as keyof typeof live;
+    const rate = live[key];
+    if (typeof rate === "number" && rate > 0) {
+      return rate;
+    }
+  }
+
+  // 4. Hardcoded default
+  console.warn(
+    `[getExchangeRate] Using default rate for ${currency} on ${dateStr}`
+  );
+  return DEFAULT_RATES[currency];
 }
 
-// Convert amount to RON
+// ── Conversion helpers ───────────────────────────────────────────────────────
+
+/** Convert amount to RON */
 export async function convertToRon(
   amount: number,
-  currency: "RON" | "EUR" | "USD",
+  currency: "RON" | "EUR" | "USD" | "GBP",
   date: string | Date
 ): Promise<number> {
   if (currency === "RON") return amount;
-
-  const rate = await getExchangeRate(date, currency as "EUR" | "USD");
+  const rate = await getExchangeRate(date, currency);
   return amount * rate;
 }
 
-// Convert amount from RON to another currency
+/** Convert amount from RON to another currency */
 export async function convertFromRon(
   amountRon: number,
-  targetCurrency: "EUR" | "USD",
+  targetCurrency: "EUR" | "USD" | "GBP",
   date: string | Date
 ): Promise<number> {
   const rate = await getExchangeRate(date, targetCurrency);
   return amountRon / rate;
 }
 
-// Get latest exchange rates
+// ── Table queries ────────────────────────────────────────────────────────────
+
+/** Get latest exchange rates from the cache table */
 export async function getLatestRates(): Promise<ExchangeRate | null> {
   const { data, error } = await supabase
     .from("exchange_rates")
@@ -72,7 +113,7 @@ export async function getLatestRates(): Promise<ExchangeRate | null> {
   return data;
 }
 
-// Get exchange rates for a date range
+/** Get exchange rates for a date range */
 export async function getRatesInRange(
   startDate: string,
   endDate: string
@@ -92,11 +133,15 @@ export async function getRatesInRange(
   return data || [];
 }
 
-// Add or update exchange rate (admin function)
+// ── Upsert / sync ────────────────────────────────────────────────────────────
+
+/** Add or update exchange rate in Supabase (admin / sync function) */
 export async function upsertExchangeRate(
   date: string,
   eurToRon: number,
-  usdToRon?: number
+  usdToRon?: number,
+  gbpToRon?: number,
+  source: string = "bono_forex"
 ): Promise<ExchangeRate> {
   const { data, error } = await supabase
     .from("exchange_rates")
@@ -104,8 +149,9 @@ export async function upsertExchangeRate(
       {
         rate_date: date,
         eur_to_ron: eurToRon,
-        usd_to_ron: usdToRon || null,
-        source: "manual",
+        usd_to_ron: usdToRon ?? null,
+        gbp_to_ron: gbpToRon ?? null,
+        source,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "rate_date" }
@@ -121,50 +167,35 @@ export async function upsertExchangeRate(
   return data;
 }
 
-// Fetch rates from BNR (Romanian National Bank) API
-// Note: This is a placeholder - actual BNR API integration would need their XML endpoint
-export async function fetchBnrRates(date?: string): Promise<{
-  eur_to_ron: number;
-  usd_to_ron: number;
-  date: string;
-} | null> {
+/**
+ * Fetch live rates from the Bono forex API and persist to Supabase.
+ * Can be called manually or by a CRON job.
+ */
+export async function syncForexRates(
+  date?: string
+): Promise<{ success: boolean; message: string }> {
   try {
-    // BNR provides rates via XML at: https://www.bnr.ro/nbrfxrates.xml
-    // For production, you would parse this XML
-    // For now, we'll use approximate current rates
-    
     const targetDate = date || new Date().toISOString().split("T")[0];
-    
-    // In production, fetch from:
-    // const response = await fetch('https://www.bnr.ro/nbrfxrates.xml');
-    // const xml = await response.text();
-    // Parse XML and extract EUR/USD rates
-    
-    // Placeholder rates (approximate Jan 2026)
-    return {
-      eur_to_ron: 4.97,
-      usd_to_ron: 4.53,
-      date: targetDate,
-    };
-  } catch (error) {
-    console.error("[fetchBnrRates] Error:", error);
-    return null;
-  }
-}
 
-// Sync rates from BNR (can be called by CRON)
-export async function syncBnrRates(): Promise<{ success: boolean; message: string }> {
-  try {
-    const rates = await fetchBnrRates();
+    const rates = await fetchForexRates(targetDate);
     if (!rates) {
-      return { success: false, message: "Failed to fetch BNR rates" };
+      return { success: false, message: "Failed to fetch rates from Bono forex API" };
     }
 
-    await upsertExchangeRate(rates.date, rates.eur_to_ron, rates.usd_to_ron);
+    await upsertExchangeRate(
+      rates.mostRecentRateDate,
+      rates.eur_to_ron,
+      rates.usd_to_ron,
+      rates.gbp_to_ron,
+      "bono_forex"
+    );
 
     return {
       success: true,
-      message: `Synced rates for ${rates.date}: EUR=${rates.eur_to_ron}, USD=${rates.usd_to_ron}`,
+      message:
+        `Synced rates for ${rates.mostRecentRateDate} ` +
+        `(requested ${rates.effectiveDate}): ` +
+        `EUR=${rates.eur_to_ron}, USD=${rates.usd_to_ron}, GBP=${rates.gbp_to_ron}`,
     };
   } catch (error) {
     return {
@@ -174,50 +205,113 @@ export async function syncBnrRates(): Promise<{ success: boolean; message: strin
   }
 }
 
-// Calculate expense amounts in all currencies
-// OPTIMIZED: Fetch both exchange rates in parallel
+// ── Expense amount calculation ───────────────────────────────────────────────
+
+/**
+ * Calculate expense amounts in all currencies.
+ * Fetches EUR, USD, and GBP rates in parallel.
+ */
 export async function calculateExpenseAmounts(
   amount: number,
-  currency: "RON" | "EUR" | "USD",
+  currency: "RON" | "EUR" | "USD" | "GBP",
   date: string | Date
 ): Promise<{
   amount_ron: number;
   amount_eur: number;
   amount_usd: number;
+  amount_gbp: number;
   exchange_rate_eur: number;
   exchange_rate_usd: number;
+  exchange_rate_gbp: number;
 }> {
-  const dateStr = typeof date === "string" ? date : date.toISOString().split("T")[0];
+  const dateStr =
+    typeof date === "string" ? date : date.toISOString().split("T")[0];
 
-  // Fetch both rates in parallel for better performance
-  const [eurRate, usdRate] = await Promise.all([
+  // Fetch all rates in parallel
+  const [eurRate, usdRate, gbpRate] = await Promise.all([
     getExchangeRate(dateStr, "EUR"),
     getExchangeRate(dateStr, "USD"),
+    getExchangeRate(dateStr, "GBP"),
   ]);
 
   let amountRon: number;
-  let amountEur: number;
-  let amountUsd: number;
 
-  if (currency === "RON") {
-    amountRon = amount;
-    amountEur = amount / eurRate;
-    amountUsd = amount / usdRate;
-  } else if (currency === "EUR") {
-    amountRon = amount * eurRate;
-    amountEur = amount;
-    amountUsd = amountRon / usdRate;
-  } else {
-    amountRon = amount * usdRate;
-    amountUsd = amount;
-    amountEur = amountRon / eurRate;
+  // Convert input amount to RON first
+  switch (currency) {
+    case "RON":
+      amountRon = amount;
+      break;
+    case "EUR":
+      amountRon = amount * eurRate;
+      break;
+    case "USD":
+      amountRon = amount * usdRate;
+      break;
+    case "GBP":
+      amountRon = amount * gbpRate;
+      break;
   }
 
   return {
     amount_ron: Math.round(amountRon * 100) / 100,
-    amount_eur: Math.round(amountEur * 100) / 100,
-    amount_usd: Math.round(amountUsd * 100) / 100,
+    amount_eur: Math.round((amountRon / eurRate) * 100) / 100,
+    amount_usd: Math.round((amountRon / usdRate) * 100) / 100,
+    amount_gbp: Math.round((amountRon / gbpRate) * 100) / 100,
     exchange_rate_eur: eurRate,
     exchange_rate_usd: usdRate,
+    exchange_rate_gbp: gbpRate,
+  };
+}
+
+// ── Private helpers ──────────────────────────────────────────────────────────
+
+/** Look up a cached rate from the exchange_rates table */
+async function getCachedRate(
+  dateStr: string,
+  currency: "EUR" | "USD" | "GBP"
+): Promise<number | null> {
+  const column =
+    currency === "EUR"
+      ? "eur_to_ron"
+      : currency === "USD"
+        ? "usd_to_ron"
+        : "gbp_to_ron";
+
+  const { data, error } = await supabase
+    .from("exchange_rates")
+    .select(column)
+    .lte("rate_date", dateStr)
+    .order("rate_date", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error || !data) return null;
+
+  const value = (data as Record<string, number | null>)[column];
+  return typeof value === "number" ? value : null;
+}
+
+/** Fetch rates from Bono API and cache in Supabase */
+async function fetchAndCacheRates(
+  dateStr: string
+): Promise<{ eur_to_ron: number; usd_to_ron: number; gbp_to_ron: number } | null> {
+  const rates = await fetchForexRates(dateStr);
+  if (!rates) return null;
+
+  // Fire-and-forget cache write (don't block the caller)
+  upsertExchangeRate(
+    rates.mostRecentRateDate,
+    rates.eur_to_ron,
+    rates.usd_to_ron,
+    rates.gbp_to_ron,
+    "bono_forex"
+  ).catch((err) =>
+    console.error("[fetchAndCacheRates] Failed to cache rates:", err)
+  );
+
+  return {
+    eur_to_ron: rates.eur_to_ron,
+    usd_to_ron: rates.usd_to_ron,
+    gbp_to_ron: rates.gbp_to_ron,
   };
 }
