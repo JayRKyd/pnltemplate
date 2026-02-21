@@ -16,6 +16,7 @@ export interface RecurringExpense {
   category_id: string | null;
   subcategory_id: string | null;
   supplier: string | null;
+  supplier_cui: string | null;
   description: string | null;
   doc_type: string | null;
   tags: string[] | null;
@@ -46,6 +47,7 @@ export interface RecurringExpenseInput {
   categoryId?: string;
   subcategoryId?: string;
   supplier?: string;
+  supplierCui?: string;
   description?: string;
   docType?: string;
   tags?: string[];
@@ -121,6 +123,7 @@ export async function createRecurringExpense(
       category_id: input.categoryId ?? null,
       subcategory_id: input.subcategoryId ?? null,
       supplier: input.supplier ?? null,
+      supplier_cui: input.supplierCui ?? null,
       description: input.description ?? null,
       doc_type: input.docType ?? null,
       tags: input.tags ?? null,
@@ -158,6 +161,7 @@ export async function updateRecurringExpense(
   if (updates.categoryId !== undefined) updateData.category_id = updates.categoryId;
   if (updates.subcategoryId !== undefined) updateData.subcategory_id = updates.subcategoryId;
   if (updates.supplier !== undefined) updateData.supplier = updates.supplier;
+  if (updates.supplierCui !== undefined) updateData.supplier_cui = updates.supplierCui;
   if (updates.description !== undefined) updateData.description = updates.description;
   if (updates.docType !== undefined) updateData.doc_type = updates.docType;
   if (updates.tags !== undefined) updateData.tags = updates.tags;
@@ -258,9 +262,12 @@ export async function generateRecurringForms(
   teamId: string,
   targetMonth?: Date
 ): Promise<number> {
+  // Use Date.UTC to avoid timezone shifts — local midnight in UTC+2 would
+  // roll back to the previous day when converted via toISOString(), causing
+  // the wrong month label to be passed to the SQL function.
   const monthDate = targetMonth
-    ? new Date(targetMonth.getFullYear(), targetMonth.getMonth(), 1)
-    : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    ? new Date(Date.UTC(targetMonth.getFullYear(), targetMonth.getMonth(), 1))
+    : new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), 1));
 
   const { data, error } = await supabase.rpc("generate_recurring_forms", {
     p_team_id: teamId,
@@ -366,6 +373,7 @@ export async function updateRecurringTemplateVersioned(
       category_id: updates.categoryId ?? currentTemplate.category_id,
       subcategory_id: updates.subcategoryId ?? currentTemplate.subcategory_id,
       supplier: updates.supplier ?? currentTemplate.supplier,
+      supplier_cui: updates.supplierCui ?? currentTemplate.supplier_cui,
       description: updates.description ?? currentTemplate.description,
       doc_type: updates.docType ?? currentTemplate.doc_type,
       tags: updates.tags ?? currentTemplate.tags,
@@ -611,7 +619,7 @@ export async function getTemplateExpenses(
       amount: exp.amount,
       supplier: exp.supplier,
     };
-  }).filter(e => e.year === year);
+  });
 }
 
 // Skip a month for a recurring template (mark RE-Form as 'skipped')

@@ -231,6 +231,7 @@ export default function NewRecurringExpensePage() {
         categoryId: cont || undefined,
         subcategoryId: subcont || undefined,
         supplier: numeFurnizor || undefined,
+        supplierCui: cuiFurnizor || undefined,
         description: descriere || undefined,
         tags: tags ? tags.split(',').map(t => t.trim()) : undefined,
         recurrenceType: 'monthly',
@@ -239,11 +240,13 @@ export default function NewRecurringExpensePage() {
       });
       
       // Generate RE-Forms for the current month (and any past months from start_date)
+      // Use Date.UTC throughout to avoid local timezone shifting midnight back to the
+      // previous day in UTC+2, which would cause the wrong month to be generated.
       const now = new Date();
-      const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const startDate = new Date(recurring.start_date);
-      const startMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-      for (let d = new Date(startMonth); d <= currentMonth; d.setMonth(d.getMonth() + 1)) {
+      const currentMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      const startDate = new Date(recurring.start_date + 'T00:00:00Z');
+      const startMonth = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1));
+      for (let d = new Date(startMonth); d <= currentMonth; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
         try {
           await generateRecurringForms(params.teamId, new Date(d));
         } catch (genErr) {

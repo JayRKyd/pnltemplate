@@ -101,17 +101,17 @@ export default function RecurringExpenseDetailPage() {
 
         // Auto-generate RE-Forms if none exist for this template
         // Only generate for months up to and including the current month (not future)
+        // Use Date.UTC throughout to avoid local timezone shifting midnight back to the
+        // previous day in UTC+2, which would cause the wrong month to be generated.
         let finalForms = reForms;
         if (expense && expense.is_active && reForms.length === 0) {
           try {
             const now = new Date();
-            const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-            const startDate = new Date(expense.start_date);
-            for (let m = 0; m < 12; m++) {
-              const targetMonth = new Date(currentYear, m, 1);
-              if (targetMonth >= new Date(startDate.getFullYear(), startDate.getMonth(), 1) && targetMonth <= currentMonth) {
-                await generateRecurringForms(params.teamId, targetMonth);
-              }
+            const currentMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+            const startDate = new Date(expense.start_date + 'T00:00:00Z');
+            const startMonth = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1));
+            for (let d = new Date(startMonth); d <= currentMonth; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
+              await generateRecurringForms(params.teamId, new Date(d));
             }
             finalForms = await getTemplateExpenses(params.id, params.teamId, currentYear);
           } catch (genError) {
@@ -132,25 +132,29 @@ export default function RecurringExpenseDetailPage() {
           setRecurringExpense(expense);
           setActiveStatus(expense.is_active ? 'activ' : 'inactiv');
           setNumeFurnizor(expense.supplier || '');
-          setCuiFurnizor(''); // CUI not stored in recurring expense
+          setCuiFurnizor(expense.supplier_cui || '');
           setDescriere(expense.description || '');
           setTags(expense.tags?.join(', ') || '');
           setCont(expense.category_id || '');
           setSubcont(expense.subcategory_id || '');
           setTvaDeductibil(expense.vat_deductible ? 'Da' : 'Nu');
 
-          if (expense.amount_with_vat) {
-            setSumaCuTVA(formatAmount(expense.amount_with_vat));
+          // Use Number() to coerce values — Supabase can return numeric columns as
+          // strings at runtime even though the TypeScript type says number.
+          const amtWithVat = Number(expense.amount_with_vat);
+          const amtWithoutVat = Number(expense.amount_without_vat);
+          const vatRate = Number(expense.vat_rate);
+          if (amtWithVat) {
+            setSumaCuTVA(formatAmount(amtWithVat));
           }
-          if (expense.amount_without_vat) {
-            setSumaFaraTVA(formatAmount(expense.amount_without_vat));
+          if (amtWithoutVat) {
+            setSumaFaraTVA(formatAmount(amtWithoutVat));
           }
-          if (expense.amount_with_vat && expense.amount_without_vat) {
-            const vatAmount = expense.amount_with_vat - expense.amount_without_vat;
-            setTva(formatAmount(vatAmount));
+          if (amtWithVat && amtWithoutVat) {
+            setTva(formatAmount(amtWithVat - amtWithoutVat));
           }
-          if (expense.vat_rate) {
-            setCotaTVA(expense.vat_rate.toFixed(2));
+          if (vatRate) {
+            setCotaTVA(vatRate.toFixed(2));
           }
         }
       } catch (error) {
@@ -360,6 +364,7 @@ export default function RecurringExpenseDetailPage() {
 
     const updatePayload = {
       supplier: numeFurnizor || undefined,
+      supplierCui: cuiFurnizor || undefined,
       description: descriere || undefined,
       tags: tags ? tags.split(',').map(t => t.trim()) : undefined,
       categoryId: cont || undefined,
@@ -421,15 +426,13 @@ export default function RecurringExpenseDetailPage() {
       const newTemplate = await updateRecurringTemplateVersioned(params.id, params.teamId, payload);
 
       // Generate RE-Forms for the new template (only up to current month, not future)
+      // Use Date.UTC to avoid local timezone shifting midnight back to previous day in UTC+2.
       const now = new Date();
-      const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const currentYear = now.getFullYear();
-      const newStart = new Date(newTemplate.start_date);
-      for (let m = 0; m < 12; m++) {
-        const targetMonth = new Date(currentYear, m, 1);
-        if (targetMonth >= new Date(newStart.getFullYear(), newStart.getMonth(), 1) && targetMonth <= currentMonth) {
-          await generateRecurringForms(params.teamId, targetMonth);
-        }
+      const currentMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      const newStart = new Date(newTemplate.start_date + 'T00:00:00Z');
+      const newStartMonth = new Date(Date.UTC(newStart.getUTCFullYear(), newStart.getUTCMonth(), 1));
+      for (let d = new Date(newStartMonth); d <= currentMonth; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
+        await generateRecurringForms(params.teamId, new Date(d));
       }
 
       await migrateClosedInstances(params.id, newTemplate.id, params.teamId);

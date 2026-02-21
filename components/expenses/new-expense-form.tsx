@@ -4,6 +4,7 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { X, Upload, ChevronDown, Plus, Check, AlertTriangle, Loader2 } from "lucide-react";
 import { createExpense, createMultiLineExpense, updateExpense, getExpense, deleteExpense, submitForApproval, ExpenseInput, ExpenseLineInput, TeamExpense } from "@/app/actions/expenses";
+import { getExchangeRate } from "@/app/actions/exchange-rates";
 import { uploadAttachment, getExpenseAttachments, getAttachmentUrl } from "@/app/actions/attachments";
 import { CalendarModal } from "@/components/ui/calendar-modal";
 import { getCategoryTree, CategoryWithChildren } from "@/app/actions/categories";
@@ -249,7 +250,17 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
   const [nrDoc, setNrDoc] = useState("");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [plata, setPlata] = useState("Neplatit");
-  
+
+  // Currency
+  const CURRENCIES = ["RON", "EUR", "USD", "GBP"] as const;
+  type Currency = typeof CURRENCIES[number];
+  const CURRENCY_FLAGS: Record<Currency, string> = { RON: "🇷🇴", EUR: "🇪🇺", USD: "🇺🇸", GBP: "🇬🇧" };
+  const CURRENCY_LABELS: Record<Currency, string> = { RON: "Lei", EUR: "EUR", USD: "USD", GBP: "GBP" };
+  const [currency, setCurrency] = useState<Currency>("RON");
+  const [exchangeRate, setExchangeRate] = useState<number | null>(null);
+  const [fetchingRate, setFetchingRate] = useState(false);
+  const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false);
+
   // Document upload
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; preview: string; type: string; size: number; isExisting?: boolean }[]>([]);
   const [activePreviewIndex, setActivePreviewIndex] = useState(0);
@@ -439,6 +450,9 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         setNrDoc(expense.doc_number || "");
         setSelectedDate(new Date(expense.expense_date));
         setPlata(expense.payment_status === "paid" ? "Platit" : "Neplatit");
+        if (expense.currency && ["RON", "EUR", "USD", "GBP"].includes(expense.currency)) {
+          setCurrency(expense.currency as "RON" | "EUR" | "USD" | "GBP");
+        }
 
         // Populate line data
         const defaultMonthYear = getCurrentMonthYear();
@@ -467,6 +481,22 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
     loadExpense();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expenseId, teamId]);
+
+  // Fetch live exchange rate when currency or date changes
+  useEffect(() => {
+    if (currency === "RON") {
+      setExchangeRate(null);
+      return;
+    }
+    let cancelled = false;
+    setFetchingRate(true);
+    const dateStr = selectedDate.toISOString().split("T")[0];
+    getExchangeRate(dateStr, currency as "EUR" | "USD" | "GBP")
+      .then(rate => { if (!cancelled) setExchangeRate(rate); })
+      .catch(() => { if (!cancelled) setExchangeRate(null); })
+      .finally(() => { if (!cancelled) setFetchingRate(false); });
+    return () => { cancelled = true; };
+  }, [currency, selectedDate]);
 
   const [deleting, setDeleting] = useState(false);
 
@@ -939,6 +969,8 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         subcategoryId: lines[0].subcategoryId || undefined,
         accountingPeriod: convertToAccountingPeriod(lines[0].lunaP) || undefined,
         status: isDraft ? "draft" : "final",
+        currency: currency,
+        exchangeRate: currency !== "RON" && exchangeRate ? exchangeRate : undefined,
       };
 
       let savedExpenseId: string;
@@ -1382,6 +1414,39 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
               )}
             </div>
 
+            {/* Currency Selector */}
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowCurrencyDropdown(!showCurrencyDropdown)}
+                style={{
+                  ...buttonBaseStyle,
+                  height: '40px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '0 12px',
+                  gap: '5px',
+                  backgroundColor: currency !== "RON" ? 'rgba(239, 246, 255, 1)' : 'white',
+                  border: `1px solid ${currency !== "RON" ? 'rgba(147, 197, 253, 1)' : 'rgba(209, 213, 220, 0.5)'}`,
+                  borderRadius: '9999px',
+                  boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)'
+                }}
+              >
+                <span style={{ fontSize: '13px' }}>{CURRENCY_FLAGS[currency]}</span>
+                <span style={{ color: currency !== "RON" ? 'rgba(37, 99, 235, 1)' : 'rgba(16, 24, 40, 1)', fontSize: '13px', fontWeight: currency !== "RON" ? 600 : 400 }}>{currency}</span>
+                <ChevronDown size={13} style={{ color: 'rgba(156, 163, 175, 1)' }} />
+              </button>
+              {showCurrencyDropdown && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '8px', backgroundColor: 'white', borderRadius: '12px', boxShadow: '0px 10px 25px rgba(0, 0, 0, 0.15)', border: '1px solid rgba(229, 231, 235, 1)', padding: '4px 0', zIndex: 50, minWidth: '100px' }}>
+                  {CURRENCIES.map(c => (
+                    <button key={c} onClick={() => { setCurrency(c); setShowCurrencyDropdown(false); }} style={{ ...buttonBaseStyle, width: '100%', padding: '8px 14px', textAlign: 'left', background: currency === c ? 'rgba(239, 246, 255, 1)' : 'none', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '13px' }}>{CURRENCY_FLAGS[c]}</span>
+                      <span style={{ color: currency === c ? 'rgba(37, 99, 235, 1)' : 'rgba(55, 65, 81, 1)', fontSize: '13px', fontWeight: currency === c ? 600 : 400 }}>{c}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Upload Button */}
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple accept="image/*,application/pdf" style={{ display: 'none' }} />
             <button 
@@ -1475,11 +1540,25 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                             <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
                           </button>
                         )}
-                        <span style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>Lei</span>
-                        <span style={{ fontSize: '12px' }}>🇷🇴</span>
+                        <span style={{ color: currency !== "RON" ? 'rgba(37, 99, 235, 1)' : 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>{CURRENCY_LABELS[currency]}</span>
+                        <span style={{ fontSize: '12px' }}>{CURRENCY_FLAGS[currency]}</span>
                       </div>
                     </div>
                   </div>
+
+                  {/* Live exchange rate chip — only on first line, only for foreign currencies */}
+                  {currency !== "RON" && index === 0 && (
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <div style={{ width: '128px' }} />
+                      <div style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', color: fetchingRate ? 'rgba(156, 163, 175, 1)' : 'rgba(37, 99, 235, 1)', padding: '3px 10px', backgroundColor: 'rgba(239, 246, 255, 1)', borderRadius: '9999px', border: '1px solid rgba(147, 197, 253, 0.5)' }}>
+                        {fetchingRate ? (
+                          <><Loader2 size={10} className="animate-spin" /><span>Se incarca cursul...</span></>
+                        ) : exchangeRate ? (
+                          <span>1 {currency} = <strong>{exchangeRate.toFixed(4)}</strong> Lei &nbsp;·&nbsp; curs Bono ({selectedDate.toISOString().split("T")[0]})</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Suma fara TVA - only show when deductible */}
                   {line.tvaDeductibil === 'Da' && (
@@ -1505,8 +1584,8 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                             <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
                           </button>
                         )}
-                        <span style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>Lei</span>
-                        <span style={{ fontSize: '12px' }}>🇷🇴</span>
+                        <span style={{ color: currency !== "RON" ? 'rgba(37, 99, 235, 1)' : 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>{CURRENCY_LABELS[currency]}</span>
+                        <span style={{ fontSize: '12px' }}>{CURRENCY_FLAGS[currency]}</span>
                       </div>
                     </div>
                   </div>
@@ -1536,8 +1615,8 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                             <X size={12} style={{ color: 'rgba(156, 163, 175, 1)' }} />
                           </button>
                         )}
-                        <span style={{ color: 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>Lei</span>
-                        <span style={{ fontSize: '12px' }}>🇷🇴</span>
+                        <span style={{ color: currency !== "RON" ? 'rgba(37, 99, 235, 1)' : 'rgba(107, 114, 128, 1)', fontSize: '12px', fontWeight: 500 }}>{CURRENCY_LABELS[currency]}</span>
+                        <span style={{ fontSize: '12px' }}>{CURRENCY_FLAGS[currency]}</span>
                       </div>
                     </div>
                   </div>
