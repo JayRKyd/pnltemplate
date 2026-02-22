@@ -156,6 +156,16 @@ export default function RecurringExpenseDetailPage() {
           if (vatRate) {
             setCotaTVA(vatRate.toFixed(2));
           }
+          // Prime manualFields so the calculation useEffect treats these as user-entered
+          // values rather than wiping them (the effect clears all non-manual fields when
+          // manualFields is empty).
+          if (amtWithVat && vatRate) {
+            setManualFields(['sumaCuTVA', 'cotaTVA']);
+          } else if (amtWithVat && amtWithoutVat) {
+            setManualFields(['sumaCuTVA', 'sumaFaraTVA']);
+          } else if (amtWithVat) {
+            setManualFields(['sumaCuTVA']);
+          }
         }
       } catch (error) {
         console.error('Failed to load recurring expense:', error);
