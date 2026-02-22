@@ -8,16 +8,27 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Missing Supabase environment variables.");
 }
 
-// Client for browser/public operations (uses anon key, subject to RLS)
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Next.js caches `fetch` calls globally, including the ones made by supabase-js
+// talking to PostgREST. For server actions that write or read live data we must
+// opt out of that cache; otherwise stale responses can be served between requests.
+const noStoreFetch: typeof fetch = (input, init) =>
+  fetch(input, { ...init, cache: "no-store" });
+
+// Client for browser/public operations (uses anon key, subject to RLS).
+// The no-store fetch is also applied here because this same client is imported
+// by server actions; without it Next.js can cache PostgREST responses globally.
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: { fetch: noStoreFetch },
+});
 
 // Admin client for server-side operations (bypasses RLS)
 // Only use this in server actions, never expose to client
-export const supabaseAdmin = supabaseServiceKey 
+export const supabaseAdmin = supabaseServiceKey
   ? createClient(supabaseUrl, supabaseServiceKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
       },
+      global: { fetch: noStoreFetch },
     })
   : supabase; // Fallback to regular client if no service key

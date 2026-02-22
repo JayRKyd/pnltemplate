@@ -721,7 +721,9 @@ export async function getRecurringExpensesWithPayments(
   endDate: string,   // YYYY-MM-DD
   includeDeleted = false
 ): Promise<RecurringExpenseWithPayments[]> {
-  // Get recurring templates
+  // Fetch ALL templates for the team (active + superseded) in a SINGLE query.
+  // This lets us resolve the full version chain entirely in JS memory, replacing
+  // what used to be N individual SELECT queries per versioned template.
   let query = supabase
     .from("team_recurring_expenses")
     .select(`
@@ -733,41 +735,50 @@ export async function getRecurringExpensesWithPayments(
     .order("created_at", { ascending: false });
 
   if (!includeDeleted) {
-    query = query.eq("is_active", true).is("deleted_at", null);
+    query = query.is("deleted_at", null);
   }
 
-  const { data: recurringExpenses, error: recError } = await query;
+  const { data: allTemplates, error: recError } = await query;
 
   if (recError) {
     console.error("[getRecurringExpensesWithPayments] Error:", recError);
     throw new Error(recError.message);
   }
 
-  if (!recurringExpenses || recurringExpenses.length === 0) {
+  if (!allTemplates || allTemplates.length === 0) {
     return [];
   }
 
-  // Get RE-Forms (real team_expenses rows) for these templates in the date range
-  const recurringIds = recurringExpenses.map(r => r.id);
+  // Active templates are what will ultimately be returned to the caller.
+  const recurringExpenses = allTemplates.filter(t => t.is_active);
+  if (recurringExpenses.length === 0) return [];
 
-  // Also include expenses linked to ancestor template versions (version chain)
-  // so that X/✓ marks carry across template versions
-  const allTemplateIds = [...recurringIds];
+  // Build an O(1) lookup map for chain traversal — no extra DB queries needed.
+  const templateMap = new Map(allTemplates.map(t => [t.id, t as { id: string; previous_version_id: string | null }]));
+
+  // Walk each active template's version chain in memory to:
+  //   1. Collect all ancestor IDs so we can look up their linked expenses.
+  //   2. Build ancestorToActive so expense instances are grouped under the right
+  //      active template regardless of which version generated them.
+  const allTemplateIds: string[] = [];
+  const ancestorToActive = new Map<string, string>();
+  const seenIds = new Set<string>();
+
   for (const rec of recurringExpenses) {
-    if (rec.previous_version_id) {
-      // Walk the version chain to collect ancestor IDs
-      let prevId: string | null = rec.previous_version_id;
-      let depth = 0;
-      while (prevId && depth < 20) {
+    if (!seenIds.has(rec.id)) {
+      allTemplateIds.push(rec.id);
+      seenIds.add(rec.id);
+    }
+    ancestorToActive.set(rec.id, rec.id);
+
+    let prevId: string | null = rec.previous_version_id;
+    while (prevId && templateMap.has(prevId)) {
+      ancestorToActive.set(prevId, rec.id);
+      if (!seenIds.has(prevId)) {
         allTemplateIds.push(prevId);
-        const { data: ancestor } = await supabase
-          .from("team_recurring_expenses")
-          .select("previous_version_id")
-          .eq("id", prevId)
-          .single();
-        prevId = ancestor?.previous_version_id || null;
-        depth++;
+        seenIds.add(prevId);
       }
+      prevId = templateMap.get(prevId)!.previous_version_id;
     }
   }
 
@@ -787,29 +798,6 @@ export async function getRecurringExpensesWithPayments(
   const skippedMap = new Map<string, Record<string, boolean>>();
   const expenseIdsMap = new Map<string, Record<string, string>>();
   const monthKeys = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-
-  // Map ancestor template IDs → active template ID for grouping
-  const ancestorToActive = new Map<string, string>();
-  for (const rec of recurringExpenses) {
-    ancestorToActive.set(rec.id, rec.id);
-    if (rec.previous_version_id) {
-      let prevId: string | null = rec.previous_version_id;
-      let depth = 0;
-      while (prevId && depth < 20) {
-        ancestorToActive.set(prevId, rec.id);
-        const found = allTemplateIds.includes(prevId);
-        if (!found) break;
-        // Walk chain (already collected above)
-        const { data: ancestor } = await supabase
-          .from("team_recurring_expenses")
-          .select("previous_version_id")
-          .eq("id", prevId)
-          .single();
-        prevId = ancestor?.previous_version_id || null;
-        depth++;
-      }
-    }
-  }
 
   (expenses || []).forEach(exp => {
     if (!exp.recurring_expense_id) return;

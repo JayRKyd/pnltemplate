@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Check, X, ChevronDown, Calendar } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getTeamExpenses, TeamExpenseListItem, ExpenseFilters, updateExpense } from "@/app/actions/expenses";
 import { 
   getRecurringExpensesWithPayments, 
@@ -232,12 +233,18 @@ export default function ExpensesPage() {
   const params = useParams<{ teamId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [expenses, setExpenses] = useState<TeamExpenseListItem[]>([]);
-  const [allRecurringExpenses, setAllRecurringExpenses] = useState<RecurringExpenseWithPayments[]>([]);
-  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpenseWithPayments[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [recurringLoading, setRecurringLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Permissions — determines isAdmin which gates some UI elements; placed early
+  // so it is declared before statusOptions useMemo references it.
+  const { data: permissions } = useQuery({
+    queryKey: ['permissions', params.teamId],
+    queryFn: () => getUserPermissions(params.teamId),
+    enabled: !!params.teamId,
+    staleTime: 5 * 60_000,
+  });
+  const isAdmin = permissions?.role === 'admin';
+
   const [showDeletedTemplates, setShowDeletedTemplates] = useState(false);
   
   // Initialize tab from URL or default to 'Cheltuieli'
@@ -333,8 +340,13 @@ export default function ExpensesPage() {
     currentlyPaid: boolean;
   } | null>(null);
 
-  // Filter states
-  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
+  // Filter states — categories fetched via React Query (cached 5 min)
+  const { data: categories = [] } = useQuery<ExpenseCategory[]>({
+    queryKey: ['categories', params.teamId],
+    queryFn: () => getTeamCategories(params.teamId),
+    enabled: !!params.teamId,
+    staleTime: 5 * 60_000,
+  });
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
@@ -413,166 +425,116 @@ export default function ExpensesPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [openDropdown]);
 
-  // Load categories (part of parallel load)
-  const loadCategories = useCallback(async () => {
-    if (!params.teamId) return;
-    try {
-      const cats = await getTeamCategories(params.teamId);
-      setCategories(cats);
-    } catch (err) {
-      console.error("Failed to fetch categories:", err);
+  // Team members — cached, used for colleague-name search matching
+  const { data: teamMembersData = [] } = useQuery({
+    queryKey: ['teamMembers', params.teamId],
+    queryFn: () => getTeamMembers(params.teamId),
+    enabled: !!params.teamId,
+    staleTime: 5 * 60_000,
+  });
+
+  // Build server-side filter object (memoised to keep the query key stable)
+  const expenseFilters = useMemo<ExpenseFilters>(() => {
+    const filters: ExpenseFilters = {};
+    if (debouncedSearch) filters.search = debouncedSearch;
+    if (selectedCategory) filters.categoryId = selectedCategory;
+    if (selectedSubcategory) filters.subcategoryId = selectedSubcategory;
+    if (selectedStatus === 'deleted') filters.includeDeleted = true;
+    else if (selectedStatus && selectedStatus !== 'recurring') filters.status = selectedStatus;
+    if (dateFrom) filters.dateFrom = dateFrom;
+    if (dateTo) filters.dateTo = dateTo;
+    return filters;
+  }, [debouncedSearch, selectedCategory, selectedSubcategory, selectedStatus, dateFrom, dateTo]);
+
+  // Raw expenses from server — React Query caches this for 30 s so switching tabs
+  // within a session shows the last result instantly while refetching in background.
+  const { data: rawExpenses = [], isLoading: loading } = useQuery<TeamExpenseListItem[]>({
+    queryKey: ['expenses', params.teamId, activeSubTab, expenseFilters],
+    queryFn: () => getTeamExpenses(params.teamId, expenseFilters),
+    enabled: !!params.teamId && activeSubTab === 'Cheltuieli',
+    staleTime: 30_000,
+  });
+
+  // Client-side filtering applied on top of the server result
+  const expenses = useMemo<TeamExpenseListItem[]>(() => {
+    let filtered = [...rawExpenses];
+
+    if (selectedPayment === 'paid') {
+      filtered = filtered.filter(exp => exp.payment_status === 'paid');
+    } else if (selectedPayment === 'unpaid') {
+      filtered = filtered.filter(exp => exp.payment_status !== 'paid');
     }
-  }, [params.teamId]);
 
-  const loadExpenses = useCallback(async () => {
-    if (!params.teamId || activeSubTab !== 'Cheltuieli') return;
-
-    setLoading(true);
-    try {
-      const filters: ExpenseFilters = {};
-      // Use debounced search value to avoid API calls on every keystroke
-      if (debouncedSearch) filters.search = debouncedSearch;
-      // Category and subcategory filters
-      if (selectedCategory) {
-        filters.categoryId = selectedCategory;
-      }
-      if (selectedSubcategory) {
-        filters.subcategoryId = selectedSubcategory;
-      }
-      // Don't pass 'recurring' or 'deleted' to backend status - handle them client-side
-      if (selectedStatus === 'deleted') {
-        filters.includeDeleted = true;
-      } else if (selectedStatus && selectedStatus !== 'recurring') {
-        filters.status = selectedStatus;
-      }
-      if (dateFrom) filters.dateFrom = dateFrom;
-      if (dateTo) filters.dateTo = dateTo;
-
-      const data = await getTeamExpenses(params.teamId, filters);
-      
-      // Apply payment filter client-side (since backend filters by status, not payment_status)
-      let filteredData = data;
-      if (selectedPayment === 'paid') {
-        filteredData = data.filter(exp => exp.payment_status === 'paid');
-      } else if (selectedPayment === 'unpaid') {
-        filteredData = data.filter(exp => exp.payment_status !== 'paid');
-      }
-      
-      // Apply recurring filter client-side if selected
-      if (selectedStatus === 'recurring') {
-        // Only show expenses whose actual DB status is still 'recurent'
-        filteredData = filteredData.filter(exp => 
-          exp.recurring_expense_id !== null && 
-          exp.status === 'recurent' &&
-          exp.payment_status !== 'paid'
-        );
-      }
-      
-      // Apply deleted filter client-side — show only soft-deleted items
-      if (selectedStatus === 'deleted') {
-        filteredData = filteredData.filter(exp => exp.deleted_at !== null);
-      }
-      
-      // Apply client-side search for tags and user/colleague if search value exists
-      if (debouncedSearch.trim()) {
-        const searchLower = debouncedSearch.toLowerCase().trim();
-        
-        // Get team members for user search
-        let teamMembers: Array<{ user_id: string; name: string | null; email: string | null }> = [];
-        try {
-          const members = await getTeamMembers(params.teamId);
-          teamMembers = members.map(m => ({
-            user_id: m.user_id,
-            name: m.name || null,
-            email: m.email || null
-          }));
-        } catch (err) {
-          console.error("Failed to load team members for search:", err);
-        }
-        
-        // Find user IDs that match the search term
-        const matchingUserIds = teamMembers
-          .filter(m => 
-            (m.name && m.name.toLowerCase().includes(searchLower)) ||
-            (m.email && m.email.toLowerCase().includes(searchLower))
-          )
-          .map(m => m.user_id);
-        
-        filteredData = filteredData.filter(exp => {
-          // Check if search matches supplier, description, or expense_uid (already done by backend)
-          const matchesBasicFields = 
-            (exp.supplier && exp.supplier.toLowerCase().includes(searchLower)) ||
-            (exp.description && exp.description.toLowerCase().includes(searchLower)) ||
-            (exp.expense_uid && exp.expense_uid.toLowerCase().includes(searchLower));
-          
-          // Check if search matches tags
-          const matchesTags = exp.tags && exp.tags.some(tag => 
-            tag.toLowerCase().includes(searchLower)
-          );
-          
-          // Check if search matches responsible user (colleague) OR creator (user who input the expense)
-          const matchesResponsibleUser = exp.responsible_id && matchingUserIds.includes(exp.responsible_id);
-          const matchesCreator = exp.user_id && matchingUserIds.includes(exp.user_id);
-          
-          return matchesBasicFields || matchesTags || matchesResponsibleUser || matchesCreator;
-        });
-      }
-      
-      setExpenses(filteredData);
-    } catch (err) {
-      console.error("Failed to fetch expenses:", err);
-    } finally {
-      setLoading(false);
+    if (selectedStatus === 'recurring') {
+      filtered = filtered.filter(exp =>
+        exp.recurring_expense_id !== null &&
+        exp.status === 'recurent' &&
+        exp.payment_status !== 'paid'
+      );
     }
-  }, [params.teamId, activeSubTab, debouncedSearch, selectedCategory, selectedSubcategory, selectedStatus, selectedPayment, dateFrom, dateTo]);
 
-  const loadRecurringExpenses = useCallback(async () => {
-    if (!params.teamId || !dateRange.startDate || !dateRange.endDate) return;
-
-    setRecurringLoading(true);
-    try {
-      const data = await getRecurringExpensesWithPayments(params.teamId, dateRange.startDate, dateRange.endDate, showDeletedTemplates);
-      setAllRecurringExpenses(data);
-    } catch (err) {
-      console.error("Failed to fetch recurring expenses:", err);
-    } finally {
-      setRecurringLoading(false);
+    if (selectedStatus === 'deleted') {
+      filtered = filtered.filter(exp => exp.deleted_at !== null);
     }
-  }, [params.teamId, dateRange.startDate, dateRange.endDate, showDeletedTemplates]);
 
-  // Filter recurring expenses based on selected filters
-  useEffect(() => {
-    if (activeSubTab !== 'Recurente') return;
+    if (debouncedSearch.trim()) {
+      const searchLower = debouncedSearch.toLowerCase().trim();
+      const matchingUserIds = teamMembersData
+        .filter(m =>
+          (m.name && m.name.toLowerCase().includes(searchLower)) ||
+          (m.email && m.email.toLowerCase().includes(searchLower))
+        )
+        .map(m => m.user_id);
 
+      filtered = filtered.filter(exp => {
+        const matchesBasicFields =
+          (exp.supplier && exp.supplier.toLowerCase().includes(searchLower)) ||
+          (exp.description && exp.description.toLowerCase().includes(searchLower)) ||
+          (exp.expense_uid && exp.expense_uid.toLowerCase().includes(searchLower));
+        const matchesTags = exp.tags && exp.tags.some(tag => tag.toLowerCase().includes(searchLower));
+        const matchesResponsibleUser = exp.responsible_id && matchingUserIds.includes(exp.responsible_id);
+        const matchesCreator = exp.user_id && matchingUserIds.includes(exp.user_id);
+        return matchesBasicFields || matchesTags || matchesResponsibleUser || matchesCreator;
+      });
+    }
+
+    return filtered;
+  }, [rawExpenses, selectedPayment, selectedStatus, debouncedSearch, teamMembersData]);
+
+  // Recurring expenses — React Query caches for 30 s
+  const { data: allRecurringExpenses = [], isLoading: recurringLoading } = useQuery<RecurringExpenseWithPayments[]>({
+    queryKey: ['recurringExpenses', params.teamId, dateRange.startDate, dateRange.endDate, showDeletedTemplates],
+    queryFn: () => getRecurringExpensesWithPayments(params.teamId, dateRange.startDate, dateRange.endDate, showDeletedTemplates),
+    enabled: !!params.teamId && !!dateRange.startDate && !!dateRange.endDate,
+    staleTime: 30_000,
+  });
+
+  // Client-side filter on top of recurring query result
+  const recurringExpenses = useMemo<RecurringExpenseWithPayments[]>(() => {
     let filtered = [...allRecurringExpenses];
 
-    // Category/Subcategory filter
     if (selectedSubcategory) {
       filtered = filtered.filter(exp => exp.subcategory_id === selectedSubcategory);
     } else if (selectedCategory) {
       filtered = filtered.filter(exp => exp.category_id === selectedCategory);
     }
 
-    // Search filter (supplier or description)
     if (searchValue.trim()) {
       const searchLower = searchValue.toLowerCase().trim();
-      filtered = filtered.filter(exp => 
+      filtered = filtered.filter(exp =>
         (exp.supplier?.toLowerCase().includes(searchLower)) ||
         (exp.description?.toLowerCase().includes(searchLower))
       );
     }
 
-    // Date filter (filter by created_at date)
     if (dateFrom || dateTo) {
       filtered = filtered.filter(exp => {
         if (!exp.created_at) return false;
         const createdDate = new Date(exp.created_at);
         const fromDate = dateFrom ? new Date(dateFrom) : null;
         const toDate = dateTo ? new Date(dateTo) : null;
-        
         if (fromDate && createdDate < fromDate) return false;
         if (toDate) {
-          // Include the entire day for "to" date
           const toDateEnd = new Date(toDate);
           toDateEnd.setHours(23, 59, 59, 999);
           if (createdDate > toDateEnd) return false;
@@ -581,25 +543,8 @@ export default function ExpensesPage() {
       });
     }
 
-    setRecurringExpenses(filtered);
-  }, [allRecurringExpenses, selectedCategory, selectedSubcategory, searchValue, dateFrom, dateTo, activeSubTab]);
-
-  // Load admin status
-  useEffect(() => {
-    if (!params.teamId) return;
-    getUserPermissions(params.teamId).then(perms => {
-      setIsAdmin(perms.role === 'admin');
-    }).catch(() => {});
-  }, [params.teamId]);
-
-  // Load all data in parallel for better performance
-  useEffect(() => {
-    Promise.all([
-      loadExpenses(),
-      loadRecurringExpenses(),
-      loadCategories(),
-    ]);
-  }, [loadExpenses, loadRecurringExpenses, loadCategories]);
+    return filtered;
+  }, [allRecurringExpenses, selectedCategory, selectedSubcategory, searchValue, dateFrom, dateTo]);
 
   const handleRecurringPaymentToggle = async () => {
     if (!recurringPaymentModal) return;
@@ -612,8 +557,8 @@ export default function ExpensesPage() {
         recurringPaymentModal.monthIndex,
         !recurringPaymentModal.currentlyPaid
       );
-      // Reload data
-      await loadRecurringExpenses();
+      // Invalidate so React Query refetches fresh data
+      await queryClient.invalidateQueries({ queryKey: ['recurringExpenses', params.teamId] });
     } catch (err) {
       console.error("Failed to update payment status:", err);
     } finally {
@@ -762,8 +707,8 @@ export default function ExpensesPage() {
                 }
               );
 
-              // Reload expenses to reflect the change
-              await loadExpenses();
+              // Invalidate so React Query refetches fresh data
+              await queryClient.invalidateQueries({ queryKey: ['expenses', params.teamId] });
             } catch (err) {
               console.error('Failed to update payment status:', err);
               // Optionally show an error message to the user
