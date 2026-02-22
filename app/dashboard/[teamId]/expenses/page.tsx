@@ -6,13 +6,11 @@ import { Check, X, ChevronDown, Calendar } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getTeamExpenses, TeamExpenseListItem, ExpenseFilters, updateExpense } from "@/app/actions/expenses";
 import { 
-  getRecurringExpensesWithPayments, 
   RecurringExpenseWithPayments,
   updateRecurringPaymentStatus 
 } from "@/app/actions/recurring-expenses";
-import { getTeamCategories, ExpenseCategory } from "@/app/actions/categories";
-import { getTeamMembers } from "@/app/actions/team-members";
-import { getUserPermissions } from "@/app/actions/permissions";
+import type { ExpenseCategory } from "@/app/actions/categories";
+import { getExpensesPageInitialData } from "@/app/actions/expenses-page-data";
 
 type TabType = 'Cheltuieli' | 'Recurente';
 
@@ -235,16 +233,6 @@ export default function ExpensesPage() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
 
-  // Permissions — determines isAdmin which gates some UI elements; placed early
-  // so it is declared before statusOptions useMemo references it.
-  const { data: permissions } = useQuery({
-    queryKey: ['permissions', params.teamId],
-    queryFn: () => getUserPermissions(params.teamId),
-    enabled: !!params.teamId,
-    staleTime: 5 * 60_000,
-  });
-  const isAdmin = permissions?.role === 'admin';
-
   const [showDeletedTemplates, setShowDeletedTemplates] = useState(false);
   
   // Initialize tab from URL or default to 'Cheltuieli'
@@ -321,6 +309,19 @@ export default function ExpensesPage() {
     
     return { startDate, endDate };
   }, [last6Months]);
+
+  // Single batched query for all stable, filter-independent page data.
+  // One browser→server round trip instead of four separate ones — critical on
+  // Vercel free tier where concurrent serverless invocations are serialised.
+  const { data: pageData } = useQuery({
+    queryKey: ['expensesPageData', params.teamId, dateRange.startDate, dateRange.endDate, showDeletedTemplates],
+    queryFn: () => getExpensesPageInitialData(params.teamId, dateRange.startDate, dateRange.endDate, showDeletedTemplates),
+    enabled: !!params.teamId && !!dateRange.startDate && !!dateRange.endDate,
+    staleTime: 30_000,
+  });
+
+  const isAdmin = pageData?.isAdmin ?? false;
+
   const [paymentModalData, setPaymentModalData] = useState<{
     isOpen: boolean;
     index: number;
@@ -340,13 +341,8 @@ export default function ExpensesPage() {
     currentlyPaid: boolean;
   } | null>(null);
 
-  // Filter states — categories fetched via React Query (cached 5 min)
-  const { data: categories = [] } = useQuery<ExpenseCategory[]>({
-    queryKey: ['categories', params.teamId],
-    queryFn: () => getTeamCategories(params.teamId),
-    enabled: !!params.teamId,
-    staleTime: 5 * 60_000,
-  });
+  // Filter states — derived from batched pageData query
+  const categories: ExpenseCategory[] = pageData?.categories ?? [];
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedSubcategory, setSelectedSubcategory] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
@@ -425,13 +421,8 @@ export default function ExpensesPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [openDropdown]);
 
-  // Team members — cached, used for colleague-name search matching
-  const { data: teamMembersData = [] } = useQuery({
-    queryKey: ['teamMembers', params.teamId],
-    queryFn: () => getTeamMembers(params.teamId),
-    enabled: !!params.teamId,
-    staleTime: 5 * 60_000,
-  });
+  // Team members — derived from batched pageData query
+  const teamMembersData = pageData?.teamMembers ?? [];
 
   // Build server-side filter object (memoised to keep the query key stable)
   const expenseFilters = useMemo<ExpenseFilters>(() => {
@@ -501,13 +492,9 @@ export default function ExpensesPage() {
     return filtered;
   }, [rawExpenses, selectedPayment, selectedStatus, debouncedSearch, teamMembersData]);
 
-  // Recurring expenses — React Query caches for 30 s
-  const { data: allRecurringExpenses = [], isLoading: recurringLoading } = useQuery<RecurringExpenseWithPayments[]>({
-    queryKey: ['recurringExpenses', params.teamId, dateRange.startDate, dateRange.endDate, showDeletedTemplates],
-    queryFn: () => getRecurringExpensesWithPayments(params.teamId, dateRange.startDate, dateRange.endDate, showDeletedTemplates),
-    enabled: !!params.teamId && !!dateRange.startDate && !!dateRange.endDate,
-    staleTime: 30_000,
-  });
+  // Recurring expenses — derived from batched pageData query (no extra request)
+  const allRecurringExpenses: RecurringExpenseWithPayments[] = pageData?.recurringExpenses ?? [];
+  const recurringLoading = !pageData && !!params.teamId && !!dateRange.startDate;
 
   // Client-side filter on top of recurring query result
   const recurringExpenses = useMemo<RecurringExpenseWithPayments[]>(() => {
@@ -557,8 +544,8 @@ export default function ExpensesPage() {
         recurringPaymentModal.monthIndex,
         !recurringPaymentModal.currentlyPaid
       );
-      // Invalidate so React Query refetches fresh data
-      await queryClient.invalidateQueries({ queryKey: ['recurringExpenses', params.teamId] });
+      // Invalidate so React Query refetches the batched page data (includes recurring)
+      await queryClient.invalidateQueries({ queryKey: ['expensesPageData', params.teamId] });
     } catch (err) {
       console.error("Failed to update payment status:", err);
     } finally {
