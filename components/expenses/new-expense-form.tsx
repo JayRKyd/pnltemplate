@@ -498,6 +498,21 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
     return () => { cancelled = true; };
   }, [currency, selectedDate]);
 
+  // When switching to a foreign currency, clear VAT breakdown fields on all lines
+  // (foreign currency expenses only store Suma cu TVA)
+  useEffect(() => {
+    if (currency !== 'RON') {
+      setLines(prev => prev.map(line => ({
+        ...line,
+        sumaFaraTVA: '',
+        tva: '',
+        cotaTVA: '',
+        manualFields: (line.manualFields as AmountField[]).filter(f => f === 'sumaCuTVA'),
+      })));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currency]);
+
   const [deleting, setDeleting] = useState(false);
 
   // Handle back navigation
@@ -950,13 +965,22 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         ? validateTags(lines[0].tags).tags
         : undefined;
       
+      const isForeignCurrency = currency !== 'RON';
+      const parsedSumaCuTVA = parseAmount(lines[0].sumaCuTVA);
+      const parsedSumaFaraTVA = parseAmount(lines[0].sumaFaraTVA);
+      // For foreign currencies: convert to RON using the day's exchange rate.
+      // amount always stored in RON; original foreign amount stored in eur_amount/usd_amount.
+      const ronAmount = isForeignCurrency && exchangeRate
+        ? parsedSumaCuTVA * exchangeRate
+        : parsedSumaCuTVA || parsedSumaFaraTVA;
+
       const baseInput: ExpenseInput = {
         teamId,
-        amount: parseAmount(lines[0].sumaCuTVA) || parseAmount(lines[0].sumaFaraTVA),
-        amountWithVat: parseAmount(lines[0].sumaCuTVA) || 0,
-        amountWithoutVat: parseAmount(lines[0].sumaFaraTVA) || 0,
-        vatRate: lines[0].cotaTVA ? parseFloat(lines[0].cotaTVA.replace("%", "").replace(",", ".")) : undefined,
-        vatDeductible: lines[0].tvaDeductibil === "Da",
+        amount: ronAmount,
+        amountWithVat: isForeignCurrency && exchangeRate ? ronAmount : (parsedSumaCuTVA || 0),
+        amountWithoutVat: isForeignCurrency ? 0 : (parsedSumaFaraTVA || 0),
+        vatRate: isForeignCurrency ? undefined : (lines[0].cotaTVA ? parseFloat(lines[0].cotaTVA.replace("%", "").replace(",", ".")) : undefined),
+        vatDeductible: isForeignCurrency ? false : lines[0].tvaDeductibil === "Da",
         supplier: furnizor || undefined,
         supplierCui: furnizorCui || undefined,
         description: lines[0].descriere || undefined,
@@ -970,7 +994,9 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         accountingPeriod: convertToAccountingPeriod(lines[0].lunaP) || undefined,
         status: isDraft ? "draft" : "final",
         currency: currency,
-        exchangeRate: currency !== "RON" && exchangeRate ? exchangeRate : undefined,
+        exchangeRate: isForeignCurrency && exchangeRate ? exchangeRate : undefined,
+        eurAmount: currency === 'EUR' ? parsedSumaCuTVA : undefined,
+        usdAmount: currency === 'USD' ? parsedSumaCuTVA : undefined,
       };
 
       let savedExpenseId: string;
@@ -987,12 +1013,17 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
         } else {
           const lineInputs: ExpenseLineInput[] = lines.map(line => {
             const lineTags = line.tags.trim() ? validateTags(line.tags).tags : undefined;
+            const lineParsed = parseAmount(line.sumaCuTVA);
+            const lineRonAmount = isForeignCurrency && exchangeRate
+              ? lineParsed * exchangeRate
+              : lineParsed || parseAmount(line.sumaFaraTVA);
+            void lineTags;
             return {
-              amount: parseAmount(line.sumaCuTVA) || parseAmount(line.sumaFaraTVA),
-              amountWithVat: parseAmount(line.sumaCuTVA) || 0,
-              amountWithoutVat: parseAmount(line.sumaFaraTVA) || 0,
-              vatRate: line.cotaTVA ? parseFloat(line.cotaTVA.replace("%", "").replace(",", ".")) : undefined,
-              vatDeductible: line.tvaDeductibil === "Da",
+              amount: lineRonAmount,
+              amountWithVat: isForeignCurrency && exchangeRate ? lineRonAmount : (parseAmount(line.sumaCuTVA) || 0),
+              amountWithoutVat: isForeignCurrency ? 0 : (parseAmount(line.sumaFaraTVA) || 0),
+              vatRate: isForeignCurrency ? undefined : (line.cotaTVA ? parseFloat(line.cotaTVA.replace("%", "").replace(",", ".")) : undefined),
+              vatDeductible: isForeignCurrency ? false : line.tvaDeductibil === "Da",
               description: line.descriere || undefined,
               categoryId: line.categoryId || undefined,
               subcategoryId: line.subcategoryId || undefined,
@@ -1561,7 +1592,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                   )}
 
                   {/* Suma fara TVA - only show when deductible */}
-                  {line.tvaDeductibil === 'Da' && (
+                  {currency === 'RON' && line.tvaDeductibil === 'Da' && (
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <label style={{ width: '128px', color: hasFieldError(index, 'sumaFaraTVA') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Suma fara TVA</label>
                     <div style={{ position: 'relative', width: '296px' }}>
@@ -1592,7 +1623,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                   )}
 
                   {/* TVA - only show when deductible */}
-                  {line.tvaDeductibil === 'Da' && (
+                  {currency === 'RON' && line.tvaDeductibil === 'Da' && (
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <label style={{ width: '128px', color: hasFieldError(index, 'tva') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>TVA</label>
                     <div style={{ position: 'relative', width: '296px' }}>
@@ -1623,7 +1654,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                   )}
 
                   {/* Cota TVA - only show when deductible */}
-                  {line.tvaDeductibil === 'Da' && (
+                  {currency === 'RON' && line.tvaDeductibil === 'Da' && (
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <label style={{ width: '128px', color: hasFieldError(index, 'cotaTVA') ? errorTextStyle : 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>Cota TVA (%)</label>
                     <div style={{ position: 'relative', width: '296px' }}>
@@ -1814,7 +1845,8 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                     </div>
                   </div>
 
-                  {/* TVA Deductibil */}
+                  {/* TVA Deductibil — hidden for foreign currencies */}
+                  {currency === 'RON' && (
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <label style={{ width: '128px', color: 'rgba(74, 85, 101, 1)', fontSize: '13px', fontWeight: 200 }}>TVA Deductibil</label>
                     <div style={{ position: 'relative', width: '296px' }}>
@@ -1842,6 +1874,7 @@ export function NewExpenseForm({ teamId, expenseId, onBack }: Props) {
                       <ChevronDown size={18} style={{ position: 'absolute', right: '12px', top: '9px', color: 'rgba(156, 163, 175, 1)', pointerEvents: 'none' }} />
                     </div>
                   </div>
+                  )}
 
                   {/* Tags */}
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
